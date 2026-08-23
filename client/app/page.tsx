@@ -1,4 +1,5 @@
 import DisruptionPanel from "@/components/DisruptionPanel";
+import DemoRunPanel from "@/components/DemoRunPanel";
 import ExposureAlert from "@/components/ExposureAlert";
 import PlanComparisonMatrix from "@/components/PlanComparisonMatrix";
 import PlanRankingTable from "@/components/PlanRankingTable";
@@ -67,6 +68,7 @@ export default async function Home() {
                 </div>
 
                 <div className="min-w-0 lg:max-h-[calc(100vh-9.5rem)] lg:overflow-y-auto lg:pr-2">
+                    <DemoRunPanel />
                     {exposures.map((exposure) => {
                         const disruption = disruptions.find(
                             (item) => item.id === exposure.disruption_id,

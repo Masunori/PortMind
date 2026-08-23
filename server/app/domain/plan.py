@@ -14,6 +14,15 @@ class PlanActionType(str, Enum):
     WAIT = "WAIT"
 
 
+class PlanStatus(str, Enum):
+    """Track the human-decision lifecycle of a contingency plan."""
+
+    GENERATED = "GENERATED"
+    RECOMMENDED = "RECOMMENDED"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+
 class PlanAction(BaseModel):
     """Describe one intervention applied before a simulation starts."""
 
@@ -50,6 +59,7 @@ class Plan(BaseModel):
     id: str
     name: str
     actions: list[PlanAction]
+    status: PlanStatus = PlanStatus.GENERATED
 
 
 class PlanScenarioResult(BaseModel):

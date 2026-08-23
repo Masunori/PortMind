@@ -2,12 +2,13 @@
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.domain.plan import Plan, PlanAction, PlanActionType
+from app.domain.plan import Plan, PlanAction, PlanActionType, PlanStatus
 from app.seed import seed
 from app.services.plan_service import (
     compare_plans_and_scenarios,
     get_plans,
     save_plan,
+    set_plan_status,
 )
 
 
@@ -42,6 +43,11 @@ def test_plan_service_upserts_and_lists_stably(
     assert [plan.id for plan in plans] == ["plan-a", "plan-z"]
     assert plans[0].name == "Emergency expedite"
     assert plans[0].actions[0].type is PlanActionType.EXPEDITE_SHIPMENT
+
+    approved = set_plan_status("plan-a", PlanStatus.APPROVED)
+    assert approved is not None
+    assert approved.status is PlanStatus.APPROVED
+    assert set_plan_status("missing", PlanStatus.REJECTED) is None
 
 
 def test_seeded_plans_compare_across_every_scenario(

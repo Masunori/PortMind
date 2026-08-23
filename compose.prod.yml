@@ -21,6 +21,7 @@ services:
       dockerfile: Dockerfile.prod
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-psa}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@database:5432/${POSTGRES_DB:-psa}
+      CLIENT_ORIGIN: ${CLIENT_ORIGIN:?Set CLIENT_ORIGIN}
     ports:
       - "8000:8000"
     depends_on:

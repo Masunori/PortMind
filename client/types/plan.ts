@@ -17,6 +17,7 @@ export type Plan = {
     id: string;
     name: string;
     actions: PlanAction[];
+    status: "GENERATED" | "RECOMMENDED" | "APPROVED" | "REJECTED";
 };
 
 export type PlanScenarioResult = {

@@ -1,9 +1,14 @@
 """Persist plans and compare their actions across all scenarios."""
 
+from collections.abc import Callable
+
 from sqlalchemy import select
 
 from app.database import SessionLocal
-from app.domain.plan import Plan, PlanAction, PlanScenarioResult
+from app.domain.plan import Plan, PlanAction, PlanScenarioResult, PlanStatus
+from app.domain.scenario import Scenario
+from app.domain.network import Network
+from app.domain.shipment import Shipment
 from app.models import PlanRecord
 from app.services.network_service import get_network, get_shipments
 from app.services.scenario_service import get_scenarios
@@ -17,6 +22,7 @@ def _to_domain(record: PlanRecord) -> Plan:
         id=record.id,
         name=record.name,
         actions=[PlanAction.model_validate(action) for action in record.actions],
+        status=PlanStatus(record.status),
     )
 
 
@@ -29,6 +35,7 @@ def save_plan(plan: Plan) -> Plan:
                 id=plan.id,
                 name=plan.name,
                 actions=[action.model_dump(mode="json") for action in plan.actions],
+                status=plan.status.value,
             )
         )
     return _to_domain(record)
@@ -44,37 +51,64 @@ def get_plans() -> list[Plan]:
         return [_to_domain(record) for record in records]
 
 
-def compare_plans_and_scenarios() -> list[PlanScenarioResult]:
-    """Run the Cartesian product of persisted plans and scenarios."""
+def set_plan_status(plan_id: str, status: PlanStatus) -> Plan | None:
+    """Persist one plan's recommendation or human-decision status."""
 
-    network = get_network()
-    shipments = get_shipments()
-    baseline = simulate(network, shipments)
+    with SessionLocal.begin() as session:
+        record = session.get(PlanRecord, plan_id)
+        if record is None:
+            return None
+        record.status = status.value
+    return _to_domain(record)
+
+
+def compare_plan_scenario_sets(
+    plans: list[Plan],
+    scenarios: list[Scenario],
+    network: Network | None = None,
+    shipments: list[Shipment] | None = None,
+    on_result: Callable[[int, int, PlanScenarioResult], None] | None = None,
+) -> list[PlanScenarioResult]:
+    """Run the Cartesian product of supplied validated plans and scenarios."""
+
+    resolved_network = network or get_network()
+    resolved_shipments = shipments if shipments is not None else get_shipments()
+    baseline = simulate(resolved_network, resolved_shipments)
     results: list[PlanScenarioResult] = []
 
-    for plan in get_plans():
-        for scenario in get_scenarios():
+    total = len(plans) * len(scenarios)
+    completed = 0
+    for plan in plans:
+        for scenario in scenarios:
             simulation = simulate(
-                network,
-                shipments,
+                resolved_network,
+                resolved_shipments,
                 scenario=scenario,
                 actions=plan.actions,
             )
-            results.append(
-                PlanScenarioResult(
-                    plan_id=plan.id,
-                    plan_name=plan.name,
-                    scenario_id=scenario.id,
-                    scenario_name=scenario.name,
-                    probability=scenario.probability,
-                    total_cost=simulation.total_cost,
-                    average_lead_time_hours=simulation.average_lead_time_hours,
-                    delay_hours=max(
-                        0,
-                        simulation.average_lead_time_hours
-                        - baseline.average_lead_time_hours,
-                    ),
-                    late_shipments=simulation.late_shipments,
-                )
+            result = PlanScenarioResult(
+                plan_id=plan.id,
+                plan_name=plan.name,
+                scenario_id=scenario.id,
+                scenario_name=scenario.name,
+                probability=scenario.probability,
+                total_cost=simulation.total_cost,
+                average_lead_time_hours=simulation.average_lead_time_hours,
+                delay_hours=max(
+                    0,
+                    simulation.average_lead_time_hours
+                    - baseline.average_lead_time_hours,
+                ),
+                late_shipments=simulation.late_shipments,
             )
+            results.append(result)
+            completed += 1
+            if on_result is not None:
+                on_result(completed, total, result)
     return results
+
+
+def compare_plans_and_scenarios() -> list[PlanScenarioResult]:
+    """Run the Cartesian product of persisted plans and scenarios."""
+
+    return compare_plan_scenario_sets(get_plans(), get_scenarios())

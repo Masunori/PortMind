@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, String
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -103,3 +103,41 @@ class PlanRecord(Base):
     id: Mapped[str] = mapped_column(String(100), primary_key=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     actions: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default="GENERATED",
+    )
+
+
+class RunRecord(Base):
+    """Persist an observable orchestration run and its final output."""
+
+    __tablename__ = "runs"
+
+    id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    signal: Mapped[str] = mapped_column(String(2000), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False)
+    scenarios: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False)
+    plans: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False)
+    results: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False)
+    recommendation: Mapped[dict[str, object] | None] = mapped_column(JSON)
+    error: Mapped[str | None] = mapped_column(String(2000))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class RunEventRecord(Base):
+    """Persist one ordered orchestration event for a run."""
+
+    __tablename__ = "run_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(
+        ForeignKey("runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    type: Mapped[str] = mapped_column(String(50), nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

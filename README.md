@@ -7,7 +7,7 @@ The local stack contains:
 - FastAPI documentation: <http://localhost:8000/docs>
 - PostgreSQL: `localhost:5432`
 
-The application currently provides a persisted supply-chain graph, deterministic shipment simulation, time-bounded network disruptions, downstream exposure analysis, weighted scenarios, and explicit contingency actions. The Next.js interface can compare every seeded intervention across every scenario.
+The application currently provides a persisted supply-chain graph, deterministic simulation, grounded event interpretation, validated scenario and plan generation, local LangGraph orchestration, observable background runs, deterministic ranking, and human plan decisions. Every AI-assisted path runs through the fixture-backed `AIProvider`; no AWS or model account is required.
 
 ## Prerequisites
 
@@ -29,7 +29,7 @@ Create or reconstruct the synthetic supply-chain data:
 docker compose -f compose.dev.yml exec server python -m app.seed
 ```
 
-The server applies pending Alembic migrations when its container starts. Waiting for health before seeding prevents the seed process from racing the migration process. The seed command is idempotent: it clears and recreates nodes, edges, shipments, disruptions, scenarios, and contingency plans.
+The server applies pending Alembic migrations when its container starts. Waiting for health before seeding prevents the seed process from racing the migration process. The seed command is idempotent: it clears observable runs and recreates nodes, edges, shipments, disruptions, scenarios, and contingency plans.
 
 To apply migrations explicitly:
 
@@ -179,6 +179,87 @@ The repository's existing canonical ID is `hai-phong-port` (equivalent to the il
 
 `EventInterpreter.interpret_and_ground()` composes the complete provider-to-domain flow. It never accepts graph IDs from AI output. For the Hai Phong demo it resolves `hai-phong-port`, edges `01-supplier-to-hai-phong` and `02-hai-phong-to-psa`, and both seeded shipments. Unknown locations remain in `unresolved_locations` and cannot enter simulation state.
 
+### Validated scenario generation
+
+`ScenarioGenerator` asks `AIProvider` only for assumptions: names, probability weights, duration, and severity. Python then rejects impossible values, requires grounded exposure, normalizes probability weights to exactly one, applies severity to supported disruption effects, and constructs domain `Scenario` objects. The deterministic mock proposes 24h, 48h, 72h, and 120h closure cases.
+
+```text
+AI generates assumptions
+        ↓
+Python validates assumptions
+        ↓
+Simulator computes consequences
+```
+
+### Capability-validated planning
+
+`ContingencyPlanner` exposes read-only backend capabilities instead of trusting provider-supplied IDs:
+
+- `get_affected_shipments()`
+- `get_available_routes()`
+- `get_inventory()`
+- `get_transport_modes()`
+- `get_route_capacity()`
+
+Every proposed action is checked against grounded exposure, real directed routes, route bottleneck capacity, shipment eligibility, and available inventory before it becomes a domain `Plan`. The mock proposes Wait, Reroute via Ho Chi Minh City, Air-freight urgent inventory, and Partial air + sea. Invented nodes, missing legs, insufficient capacity, and unaffected shipments are rejected.
+
+## Local LangGraph workflow
+
+The provider-neutral workflow is compiled with LangGraph's `StateGraph` and works entirely locally:
+
+```text
+interpret signal
+      ↓
+ground entities
+      ↓
+analyze exposure ── no significant shipments ──→ END
+      ↓
+generate scenarios
+      ↓
+generate plans
+      ↓
+simulate plan × scenario matrix
+      ↓
+rank plans
+      ↓
+END
+```
+
+LangGraph receives `AIProvider`, so graph nodes do not care whether a future implementation is a mock, local model, or another provider. No LangChain model integration, LangSmith account, cloud deployment, or AWS dependency is used.
+
+### Observable runs
+
+`POST /api/runs` creates a persisted run with `GENERATED` status and schedules the local workflow as a FastAPI background task. `GET /api/runs/{id}` returns its latest state. `GET /api/runs/{id}/events` streams persisted server-sent events until the run reaches `COMPLETED` or `FAILED`:
+
+```text
+RUN_STARTED
+SIGNAL_INTERPRETED
+ENTITIES_GROUNDED
+EXPOSURE_ANALYZED
+SCENARIOS_GENERATED
+PLANS_GENERATED
+SIMULATION_STARTED
+SIMULATION_COMPLETED × 16
+RANKING_COMPLETED
+RUN_COMPLETED
+```
+
+Event sequence numbers are monotonic and support cursor-based reads internally. Failed providers persist both `FAILED` run state and `RUN_FAILED` events instead of leaving work indefinitely active.
+
+### Human decisions and canonical demo
+
+Plans use `GENERATED`, `RECOMMENDED`, `APPROVED`, and `REJECTED` lifecycle states. Approval and rejection are explicit persisted API decisions; AI generation never approves an intervention.
+
+The client includes **Reset Demo** and **Inject Demo Signal** controls. The canonical signal is:
+
+```text
+Severe weather may close Hai Phong for 2–3 days.
+```
+
+It reliably grounds Hai Phong, exposes both seeded shipments, generates four scenarios and four plans, executes 16 simulations, and recommends **Partial air + sea** using the workflow weights `cost=1`, `delay=300`, and `risk=0.25`. The UI consumes the SSE stream to show completed milestones and matrix progress, then allows the recommended plan to be approved or rejected.
+
+Feature development intentionally stops here before any `bedrock.py` adapter. The repository contains no AWS SDK, Bedrock, or Bedrock AgentCore dependency.
+
 ## API
 
 FastAPI exposes:
@@ -200,6 +281,12 @@ FastAPI exposes:
 - `POST /api/plans` — create or replace a plan by ID
 - `POST /api/plans/compare` — simulate every plan × scenario combination
 - `POST /api/plans/rank` — rank plans with configurable cost, delay, and risk weights
+- `POST /api/plans/{id}/approve` — persist human approval
+- `POST /api/plans/{id}/reject` — persist human rejection
+- `POST /api/runs` — create and schedule an observable local workflow
+- `GET /api/runs/{id}` — retrieve current run state and final output
+- `GET /api/runs/{id}/events` — stream persisted workflow progress over SSE
+- `POST /api/demo/reset` — reconstruct the deterministic canonical demo
 
 Interactive request and response documentation is available at <http://localhost:8000/docs>.
 
@@ -263,4 +350,4 @@ docker compose -f compose.dev.yml up -d --build server
 
 The server receives its database connection through `DATABASE_URL`. Within Docker Compose, services connect to PostgreSQL using the hostname `database`; `localhost:5432` is intended for tools running on the host.
 
-`NEXT_PUBLIC_API_URL` is compiled into the production Next.js bundle. Set it to the browser-accessible API URL before building the client image.
+`NEXT_PUBLIC_API_URL` is compiled into the production Next.js bundle. Set it to the browser-accessible API URL before building the client image. `CLIENT_ORIGIN` configures the exact browser origin allowed to call FastAPI and consume run events; production Compose requires it explicitly.

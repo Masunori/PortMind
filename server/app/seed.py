@@ -10,6 +10,8 @@ from app.models import (
     EdgeRecord,
     NodeRecord,
     PlanRecord,
+    RunEventRecord,
+    RunRecord,
     ScenarioRecord,
     ShipmentRecord,
 )
@@ -225,6 +227,8 @@ def seed() -> None:
     ]
 
     with SessionLocal.begin() as session:
+        session.execute(delete(RunEventRecord))
+        session.execute(delete(RunRecord))
         session.execute(delete(PlanRecord))
         session.execute(delete(ScenarioRecord))
         session.execute(delete(DisruptionRecord))

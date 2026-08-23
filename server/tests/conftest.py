@@ -15,6 +15,7 @@ from app.services import disruption_service
 from app.services import network_service
 from app.services import plan_service
 from app.services import scenario_service
+from app.services import run_service
 from app import seed as seed_module
 
 
@@ -97,6 +98,7 @@ def test_session_factory(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(network_service, "SessionLocal", factory)
     monkeypatch.setattr(plan_service, "SessionLocal", factory)
     monkeypatch.setattr(scenario_service, "SessionLocal", factory)
+    monkeypatch.setattr(run_service, "SessionLocal", factory)
 
     yield factory
 

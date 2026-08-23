@@ -138,12 +138,15 @@ def _apply_actions(
             )
         adjusted[action.shipment_id] = shipment
 
-        if action.type is PlanActionType.EXPEDITE_SHIPMENT:
-            current_time, current_cost = modifiers.get(action.shipment_id, (1, 1))
-            modifiers[action.shipment_id] = (
-                current_time * action.transit_time_multiplier,
-                current_cost * action.cost_multiplier,
-            )
+        current_time, current_cost = modifiers.get(action.shipment_id, (1, 1))
+        modifiers[action.shipment_id] = (
+            current_time * (
+                action.transit_time_multiplier
+                if action.type is PlanActionType.EXPEDITE_SHIPMENT
+                else 1
+            ),
+            current_cost * action.cost_multiplier,
+        )
 
     return list(adjusted.values()), modifiers
 

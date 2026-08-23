@@ -43,11 +43,14 @@ def _score_plan(
     )
 
 
-def rank_plans(weights: RankingWeights) -> PlanRankingResult:
-    """Rank all plans by ascending weighted score and recommend the best."""
+def rank_plan_results(
+    comparisons: list[PlanScenarioResult],
+    weights: RankingWeights,
+) -> PlanRankingResult:
+    """Rank supplied plan comparisons by ascending weighted score."""
 
     grouped: dict[str, list[PlanScenarioResult]] = defaultdict(list)
-    for result in compare_plans_and_scenarios():
+    for result in comparisons:
         grouped[result.plan_id].append(result)
     if not grouped:
         raise ValueError("No plan comparison results are available")
@@ -66,3 +69,9 @@ def rank_plans(weights: RankingWeights) -> PlanRankingResult:
         weights=weights,
         plans=ranked,
     )
+
+
+def rank_plans(weights: RankingWeights) -> PlanRankingResult:
+    """Rank all persisted plans by ascending weighted score."""
+
+    return rank_plan_results(compare_plans_and_scenarios(), weights)

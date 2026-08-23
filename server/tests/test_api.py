@@ -1,12 +1,17 @@
 """Unit tests for supply-chain API handlers."""
 
+import asyncio
+from datetime import datetime, timezone
+
 import pytest
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
 
 from app.api import disruption as disruption_api
+from app.api import demo as demo_api
 from app.api import network as network_api
 from app.api import plan as plan_api
 from app.api import scenario as scenario_api
+from app.api import run as run_api
 from app.api import simulation as simulation_api
 from app.domain.disruption import (
     Disruption,
@@ -16,8 +21,21 @@ from app.domain.disruption import (
 )
 from app.domain.exposure import ExposureAnalysis
 from app.domain.network import Network
-from app.domain.plan import Plan, PlanAction, PlanActionType, PlanScenarioResult
+from app.domain.plan import (
+    Plan,
+    PlanAction,
+    PlanActionType,
+    PlanScenarioResult,
+    PlanStatus,
+)
 from app.domain.ranking import PlanRankingResult, RankedPlan, RankingWeights
+from app.domain.run import (
+    RunEvent,
+    RunEventType,
+    RunRequest,
+    RunResponse,
+    RunStatus,
+)
 from app.domain.scenario import Scenario, ScenarioSimulationResult
 from app.domain.shipment import Shipment
 from app.simulation.result import SimulationResult
@@ -35,6 +53,25 @@ def test_network_handlers_return_service_results(
 
     assert network_api.network() is sample_network
     assert network_api.shipments() == [sample_shipment]
+
+
+def test_demo_reset_reconstructs_seed_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The canonical demo reset endpoint delegates to the idempotent seed."""
+
+    called = False
+
+    def reset() -> None:
+        """Record one seed invocation."""
+
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(demo_api, "seed", reset)
+
+    assert demo_api.reset_demo() == {"status": "reset"}
+    assert called is True
 
 
 def test_disruption_handlers_persist_and_list_service_values(
@@ -319,3 +356,110 @@ def test_plan_ranking_handler_returns_service_result(
     monkeypatch.setattr(plan_api, "rank_plans", lambda supplied: result)
 
     assert plan_api.rank(weights) is result
+
+
+def test_plan_decision_handlers_persist_human_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Approval and rejection endpoints delegate explicit plan statuses."""
+
+    plan = Plan(id="plan-1", name="Wait", actions=[])
+    monkeypatch.setattr(
+        plan_api,
+        "set_plan_status",
+        lambda _identifier, status: plan.model_copy(update={"status": status}),
+    )
+
+    assert plan_api.approve_plan(plan.id).status is PlanStatus.APPROVED
+    assert plan_api.reject_plan(plan.id).status is PlanStatus.REJECTED
+
+
+def test_plan_decision_returns_404_for_unknown_plan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Human decisions cannot target a nonexistent plan."""
+
+    monkeypatch.setattr(plan_api, "set_plan_status", lambda _id, _status: None)
+
+    with pytest.raises(HTTPException) as caught:
+        plan_api.approve_plan("missing")
+
+    assert caught.value.status_code == 404
+
+
+def test_run_handler_returns_orchestrated_service_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The run API delegates raw signals to the orchestration service."""
+
+    request = RunRequest(signal="Weather warning")
+    response = RunResponse(
+        run_id="run-1",
+        status=RunStatus.GENERATED,
+        signal=request.signal,
+        scenarios=[],
+        plans=[],
+        results=[],
+        recommendation=None,
+    )
+
+    monkeypatch.setattr(run_api, "start_run", lambda _request: response)
+    background_tasks = BackgroundTasks()
+
+    assert asyncio.run(run_api.create_run(request, background_tasks)) is response
+    assert len(background_tasks.tasks) == 1
+
+
+def test_run_lookup_returns_404_for_unknown_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Lookup of an unknown observable run returns HTTP 404."""
+
+    monkeypatch.setattr(run_api, "get_run", lambda _run_id: None)
+
+    with pytest.raises(HTTPException) as caught:
+        run_api.run("missing")
+
+    assert caught.value.status_code == 404
+
+
+def test_run_event_endpoint_streams_persisted_sse(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The event endpoint formats persisted milestones as SSE records."""
+
+    completed = RunResponse(
+        run_id="run-1",
+        status=RunStatus.COMPLETED,
+        signal="Weather",
+        scenarios=[],
+        plans=[],
+        results=[],
+        recommendation=None,
+    )
+    event = RunEvent(
+        sequence=1,
+        type=RunEventType.RUN_COMPLETED,
+        payload={},
+        created_at=datetime.now(timezone.utc),
+    )
+    monkeypatch.setattr(run_api, "get_run", lambda _run_id: completed)
+    monkeypatch.setattr(
+        run_api,
+        "get_run_events",
+        lambda _run_id, _cursor: [event],
+    )
+
+    response = run_api.run_events(completed.run_id)
+
+    async def collect() -> str:
+        """Collect the finite completed-run event stream."""
+
+        chunks: list[str] = []
+        async for chunk in response.body_iterator:
+            chunks.append(chunk.decode() if isinstance(chunk, bytes) else chunk)
+        return "".join(chunks)
+
+    body = asyncio.run(collect())
+    assert "event: RUN_COMPLETED" in body
+    assert "id: 1" in body

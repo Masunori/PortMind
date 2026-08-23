@@ -25,6 +25,8 @@ def test_initial_migration_upgrades_and_downgrades(
         "alembic_version",
         "nodes",
         "plans",
+        "run_events",
+        "runs",
         "edges",
         "shipments",
         "disruptions",
@@ -35,6 +37,10 @@ def test_initial_migration_upgrades_and_downgrades(
         for column in inspect(engine).get_columns("disruptions")
     }
     assert "enabled" in disruption_columns
+    plan_columns = {
+        column["name"] for column in inspect(engine).get_columns("plans")
+    }
+    assert "status" in plan_columns
 
     command.downgrade(config, "base")
 
