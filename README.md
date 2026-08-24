@@ -1,4 +1,4 @@
-# PSA ESG Platform
+# PortMind Platform
 
 The local stack contains:
 
