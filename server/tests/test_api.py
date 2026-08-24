@@ -176,6 +176,7 @@ def test_simulation_handler_uses_persisted_network(
         "get_disruptions",
         lambda enabled_only=False: [],
     )
+    monkeypatch.setattr(simulation_api, "get_rules", lambda enabled_only=False: [])
 
     result = simulation_api.run_simulation(horizon_hours=168)
 
@@ -201,6 +202,7 @@ def test_simulation_handler_returns_422_for_invalid_state(
         "get_disruptions",
         lambda enabled_only=False: [],
     )
+    monkeypatch.setattr(simulation_api, "get_rules", lambda enabled_only=False: [])
 
     with pytest.raises(HTTPException) as caught:
         simulation_api.run_simulation(horizon_hours=168)

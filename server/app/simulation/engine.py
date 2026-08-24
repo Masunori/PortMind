@@ -8,10 +8,13 @@ from app.domain.edge import Edge
 from app.domain.network import Network
 from app.domain.plan import PlanAction, PlanActionType
 from app.domain.scenario import Scenario
+from app.domain.rule import SimulationRule
 from app.domain.shipment import Shipment
 from app.simulation.events import EventType, SimulationEvent
 from app.simulation.result import SimulationResult
 from app.simulation.state import SimulationState
+from app.simulation.rules import apply_edge_rules
+from app.simulation.rules import apply_rule
 
 
 def _edge_index(network: Network) -> dict[tuple[str, str], Edge]:
@@ -111,6 +114,29 @@ def _departure_effects(
     return (max(wait_until) if wait_until else None), transit_time
 
 
+def _edge_with_custom_effects(
+    edge: Edge,
+    time_hours: float,
+    disruptions: list[Disruption],
+) -> Edge:
+    """Return an ephemeral edge with validated custom disruption effects."""
+
+    attributes = dict(edge.attributes)
+    for disruption in _active_disruptions(disruptions, time_hours):
+        if edge.id not in disruption.affected_edge_ids:
+            continue
+        for effect in disruption.effects.custom_effects:
+            prefix = "edge.attributes."
+            if not effect.target_field.startswith(prefix):
+                continue
+            key = effect.target_field.removeprefix(prefix)
+            current = attributes.get(key)
+            if not isinstance(current, (int, float)) or isinstance(current, bool):
+                raise ValueError(f"Custom disruption field {key} is not numeric")
+            attributes[key] = apply_rule(float(current), effect.value, effect.operation)
+    return edge.model_copy(update={"attributes": attributes})
+
+
 def _apply_actions(
     shipments: list[Shipment],
     actions: list[PlanAction],
@@ -158,6 +184,7 @@ def simulate(
     disruptions: list[Disruption] | None = None,
     actions: list[PlanAction] | None = None,
     scenario: Scenario | None = None,
+    rules: list[SimulationRule] | None = None,
 ) -> SimulationResult:
     """Simulate shipment traversal and active disruption effects."""
 
@@ -250,6 +277,8 @@ def simulate(
             )
             transit_time *= time_multiplier
             state.total_cost += edge.cost * cost_multiplier
+            effective_edge = _edge_with_custom_effects(edge, event.time_hours, disruptions)
+            apply_edge_rules(state.custom_metrics, rules or [], effective_edge, shipment)
             heapq.heappush(
                 queue,
                 SimulationEvent(
@@ -302,4 +331,5 @@ def simulate(
         average_delay_hours=(sum(delay_hours) / len(delay_hours) if delay_hours else 0),
         late_shipments=len(state.late_shipments),
         final_inventory=state.inventory,
+        custom_metrics=state.custom_metrics,
     )

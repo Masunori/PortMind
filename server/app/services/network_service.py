@@ -25,6 +25,8 @@ def get_network() -> Network:
                 type=node.type,
                 inventory=node.inventory,
                 capacity=node.capacity,
+                schema_version_id=node.schema_version_id,
+                attributes=node.attributes or {},
             )
             for node in node_records
         ],
@@ -37,6 +39,8 @@ def get_network() -> Network:
                 transit_time_hours=edge.transit_time_hours,
                 cost=edge.cost,
                 capacity=edge.capacity,
+                schema_version_id=edge.schema_version_id,
+                attributes=edge.attributes or {},
             )
             for edge in edge_records
         ],

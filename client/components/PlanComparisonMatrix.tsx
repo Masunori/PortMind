@@ -3,6 +3,7 @@
 import { useActionState } from "react";
 
 import { compareContingencyPlans } from "@/app/actions";
+import LoadingButton from "@/components/LoadingButton";
 import type { Plan, PlanComparisonActionState } from "@/types/plan";
 import type { Scenario } from "@/types/scenario";
 
@@ -56,13 +57,15 @@ export default function PlanComparisonMatrix({
                     </p>
                 </div>
                 <form action={action}>
-                    <button
+                    <LoadingButton
                         type="submit"
                         disabled={pending || plans.length === 0 || scenarios.length === 0}
+                        pending={pending}
+                        pendingLabel="Comparing interventions…"
                         className="rounded-xl bg-emerald-700 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-800 disabled:cursor-wait disabled:opacity-60"
                     >
-                        {pending ? "Comparing interventions…" : "Compare interventions"}
-                    </button>
+                        Compare interventions
+                    </LoadingButton>
                 </form>
             </div>
 

@@ -12,10 +12,21 @@ from app.domain.network import Network
 from app.domain.node import Node
 from app.domain.shipment import Shipment
 from app.services import disruption_service
+from app.services import document_service
+from app.services import alias_service
+from app.services import candidate_service
+from app.services import event_service
 from app.services import network_service
 from app.services import plan_service
 from app.services import scenario_service
+from app.services import source_service
+from app.services import scheduler_service
 from app.services import run_service
+from app.services import relevance_service
+from app.services import context_version_service
+from app.services import graph_service
+from app.services import rule_service
+from app.services import schema_service
 from app import seed as seed_module
 
 
@@ -95,10 +106,22 @@ def test_session_factory(monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(seed_module, "SessionLocal", factory)
     monkeypatch.setattr(disruption_service, "SessionLocal", factory)
+    monkeypatch.setattr(document_service, "SessionLocal", factory)
+    monkeypatch.setattr(alias_service, "SessionLocal", factory)
+    monkeypatch.setattr(candidate_service, "SessionLocal", factory)
+    monkeypatch.setattr(event_service, "SessionLocal", factory)
     monkeypatch.setattr(network_service, "SessionLocal", factory)
     monkeypatch.setattr(plan_service, "SessionLocal", factory)
     monkeypatch.setattr(scenario_service, "SessionLocal", factory)
     monkeypatch.setattr(run_service, "SessionLocal", factory)
+    monkeypatch.setattr(relevance_service, "SessionLocal", factory)
+    monkeypatch.setattr(context_version_service, "SessionLocal", factory)
+    monkeypatch.setattr(graph_service, "SessionLocal", factory)
+    monkeypatch.setattr(rule_service, "SessionLocal", factory)
+    monkeypatch.setattr(schema_service, "SessionLocal", factory)
+    monkeypatch.setattr(source_service, "SessionLocal", factory)
+    monkeypatch.setattr(scheduler_service, "get_due_sources", source_service.get_due_sources)
+    monkeypatch.setattr(scheduler_service, "record_source_run", source_service.record_source_run)
 
     yield factory
 

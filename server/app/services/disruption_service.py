@@ -4,7 +4,48 @@ from sqlalchemy import select
 
 from app.database import SessionLocal
 from app.domain.disruption import Disruption, DisruptionEffects
-from app.models import DisruptionRecord
+from app.domain.schema import FieldDefinition, FieldType
+from app.models import DisruptionRecord, EdgeRecord, NodeRecord, SchemaVersionRecord
+
+
+def _validate_custom_effects(disruption: Disruption) -> None:
+    """Require custom effect targets to be declared numeric entity fields."""
+
+    if not disruption.effects.custom_effects:
+        return
+    with SessionLocal() as session:
+        for effect in disruption.effects.custom_effects:
+            entity_kind, _attributes, key = effect.target_field.split(".", 2)
+            identifiers = (
+                disruption.affected_node_ids
+                if entity_kind == "node"
+                else disruption.affected_edge_ids
+            )
+            model = NodeRecord if entity_kind == "node" else EdgeRecord
+            if not identifiers:
+                raise ValueError(
+                    f"Custom effect {effect.target_field} has no affected {entity_kind} targets"
+                )
+            for identifier in identifiers:
+                record = session.get(model, identifier)
+                if record is None:
+                    raise ValueError(f"Custom effect target {identifier} does not exist")
+                version = session.get(SchemaVersionRecord, record.schema_version_id)
+                definitions = {
+                    item.key: item
+                    for item in (
+                        FieldDefinition.model_validate(raw)
+                        for raw in (version.fields if version else [])
+                    )
+                }
+                definition = definitions.get(key)
+                if definition is None or definition.type not in {
+                    FieldType.NUMBER,
+                    FieldType.INTEGER,
+                }:
+                    raise ValueError(
+                        f"Custom effect field {effect.target_field} is not a declared numeric field"
+                    )
 
 
 def _to_domain(record: DisruptionRecord) -> Disruption:
@@ -25,6 +66,7 @@ def _to_domain(record: DisruptionRecord) -> Disruption:
 def save_disruption(disruption: Disruption) -> Disruption:
     """Create or replace a disruption with the same identifier."""
 
+    _validate_custom_effects(disruption)
     with SessionLocal.begin() as session:
         record = session.merge(
             DisruptionRecord(

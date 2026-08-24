@@ -6,7 +6,12 @@ from typing import Any
 from pydantic import BaseModel
 
 from app.ai.base import T
-from app.ai.schemas import DisruptionSignal, InterpretedSignal
+from app.ai.schemas import (
+    DisruptionExtraction,
+    DisruptionSignal,
+    InterpretedSignal,
+    RelevanceAssessment,
+)
 
 FixtureMap = Mapping[type[BaseModel], Mapping[str, Any]]
 PromptFixtureMap = Mapping[
@@ -29,6 +34,22 @@ DEFAULT_FIXTURES: FixtureMap = {
         "expected_duration_max_hours": None,
         "severity": None,
         "confidence": 0,
+    },
+    RelevanceAssessment: {
+        "relevance_probability": 0.9,
+        "rationale": "The document describes disruption risk at a network location.",
+        "matched_entities": ["Hai Phong Port"],
+    },
+    DisruptionExtraction: {
+        "disruption_type": "PORT_CLOSURE",
+        "affected_locations": ["Hai Phong Port"],
+        "start_time_hours": 0,
+        "end_time_hours": 48,
+        "probability": 0.85,
+        "severity": 0.9,
+        "effects": {"edge_disabled": True},
+        "summary": "Hai Phong suspends container handling for 48 hours.",
+        "confidence": 0.91,
     },
 }
 
@@ -170,7 +191,28 @@ DEFAULT_PROMPT_FIXTURES: PromptFixtureMap = {
                 "confidence": 0.8,
             },
         ),
-    )
+        (
+            "container handling is suspended",
+            {
+                "event_type": "PORT_CLOSURE",
+                "locations": ["Hai Phong Port"],
+                "expected_duration_min_hours": 48,
+                "expected_duration_max_hours": 48,
+                "severity": 0.9,
+                "confidence": 0.91,
+            },
+        ),
+    ),
+    RelevanceAssessment: (
+        (
+            "football results",
+            {
+                "relevance_probability": 0.05,
+                "rationale": "The content is unrelated to supply-chain operations.",
+                "matched_entities": [],
+            },
+        ),
+    ),
 }
 
 

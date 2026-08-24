@@ -3,6 +3,7 @@
 import { useActionState } from "react";
 
 import { rankContingencyPlans } from "@/app/actions";
+import LoadingButton from "@/components/LoadingButton";
 import type { PlanRankingActionState } from "@/types/plan";
 
 const initialState: PlanRankingActionState = {
@@ -67,13 +68,15 @@ export default function PlanRankingTable() {
                     <WeightInput label="Cost weight" name="cost_weight" defaultValue={1} />
                     <WeightInput label="Delay weight" name="delay_weight" defaultValue={100} />
                     <WeightInput label="Risk weight" name="risk_weight" defaultValue={0.25} />
-                    <button
+                    <LoadingButton
                         type="submit"
                         disabled={pending}
+                        pending={pending}
+                        pendingLabel="Ranking plans…"
                         className="rounded-xl bg-indigo-700 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-800 disabled:cursor-wait disabled:opacity-60"
                     >
-                        {pending ? "Ranking plans…" : "Rank plans"}
-                    </button>
+                        Rank plans
+                    </LoadingButton>
                 </div>
             </form>
 

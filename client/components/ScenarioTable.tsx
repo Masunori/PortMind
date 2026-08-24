@@ -3,6 +3,7 @@
 import { useActionState } from "react";
 
 import { runAllScenarios } from "@/app/actions";
+import LoadingButton from "@/components/LoadingButton";
 import type { ScenarioActionState, Scenario } from "@/types/scenario";
 
 const initialState: ScenarioActionState = {
@@ -42,13 +43,15 @@ export default function ScenarioTable({ scenarios }: ScenarioTableProps) {
                     </p>
                 </div>
                 <form action={action}>
-                    <button
+                    <LoadingButton
                         type="submit"
                         disabled={pending || scenarios.length === 0}
+                        pending={pending}
+                        pendingLabel="Running scenarios…"
                         className="rounded-xl bg-sky-700 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-800 disabled:cursor-wait disabled:opacity-60"
                     >
-                        {pending ? "Running scenarios…" : "Run all scenarios"}
-                    </button>
+                        Run all scenarios
+                    </LoadingButton>
                 </form>
             </div>
 

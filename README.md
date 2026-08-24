@@ -7,7 +7,7 @@ The local stack contains:
 - FastAPI documentation: <http://localhost:8000/docs>
 - PostgreSQL: `localhost:5432`
 
-The application currently provides a persisted supply-chain graph, deterministic simulation, grounded event interpretation, validated scenario and plan generation, local LangGraph orchestration, observable background runs, deterministic ranking, and human plan decisions. Every AI-assisted path runs through the fixture-backed `AIProvider`; no AWS or model account is required.
+The application currently provides a persisted supply-chain graph, deterministic simulation, source and document ingestion, relevance review, grounded disruption candidates, validated scenario and plan generation, local LangGraph orchestration, observable background runs, deterministic ranking, and human plan decisions. Every AI-assisted path runs through the fixture-backed `AIProvider`; no AWS or model account is required.
 
 ## Prerequisites
 
@@ -50,6 +50,97 @@ docker compose -f compose.dev.yml exec server pytest
 ```
 
 For local development, install `server/requirements-dev.txt` in a virtual environment and run `pytest` from the `server` directory.
+
+## Intelligence ingestion and operations review
+
+This phase adds a provider-neutral path from external evidence into the existing deterministic MVP:
+
+```text
+Data source → Raw document → Relevance assessment → Intelligence event
+            → Grounded candidate → Human confirmation → Disruption
+            → Exposure/scenarios/plans/simulation/ranking
+```
+
+Open <http://localhost:3000/sources> for the analyst workspace and <http://localhost:3000/disruptions/candidates> for the operator inbox. Scraper mechanics remain in the Sources area; operators work with validated potential disruptions and their exposure previews.
+
+All application actions provide consistent progress feedback. The active button displays an animated spinner and an action-specific label, exposes `aria-busy` to assistive technology, and cannot be submitted again until its request and interface refresh finish. Related controls are temporarily disabled to prevent conflicting operations.
+
+### Sources and documents
+
+Website sources have their own URL, enable state, HTML scraper configuration, interval, last run, next run, status, and error. **Collect now** performs an immediate HTTP collection. With `ENABLE_SOURCE_SCHEDULER=true` (enabled by `compose.dev.yml`), one APScheduler polling job checks every minute and runs only sources whose independent `next_run_at` is due. One source failure is recorded without preventing other due sources from running.
+
+Expand **Edit source and discovery settings** on any configured website to modify the same fields available during creation: name, URL, description, collection interval, discovery mode, depth, page budget, keywords, RSS/Atom URL, sitemap URL, and allowed or excluded paths. Saving recalculates that source's next scheduled run from its new interval. **Delete** requires browser confirmation and permanently removes the source together with its collected documents and dependent review records through database cascades. Previously confirmed standalone disruptions are not deleted with their original evidence source.
+
+Website collection can optionally discover article pages instead of storing only the configured landing page. The deterministic collector combines four mechanisms:
+
+```text
+configured website
+├── advertised or explicit RSS/Atom feed ──→ terminal article URLs
+├── explicit/default sitemap index ────────→ terminal article URLs
+└── configured page ───────────────────────→ bounded same-site BFS
+```
+
+RSS and sitemap entries seed the shared URL queue directly and do not consume HTML link depth. HTML navigation uses breadth-first traversal. Depth `0` fetches only the configured page, depth `1` can fetch its accepted links, and depth `2` can traverse a news/category page to its articles. Article pages are terminal and are not expanded. The recommended starting values are depth `2` and a 50-page request budget.
+
+Before enqueueing an HTML link, the collector applies same-host restrictions, allowed and excluded path prefixes, canonical URL normalization, tracking-parameter removal, `robots.txt`, and deterministic keyword/navigation scoring. URLs such as News, Press, Alerts, and Media hubs may be traversed even when they do not contain an operational keyword; unrelated leaf links are pruned. Fetched pages must match a configured keyword in their URL, title, or initial text before becoming raw documents. This is intentionally deterministic rather than LLM-controlled, so crawl coverage and tests remain repeatable. The existing mock-backed relevance assessment performs the later semantic classification.
+
+To find a site's RSS or Atom feed:
+
+1. Look for **RSS**, **Atom**, **Subscribe**, or the feed icon on its News or Press page.
+2. Inspect the page source for `<link rel="alternate" type="application/rss+xml" ...>` or `application/atom+xml`. Auto mode detects these links.
+3. Try common paths such as `/feed`, `/rss`, `/news/feed`, or `/atom.xml`.
+4. Open the candidate URL directly. A feed normally shows XML containing `<rss>`, `<feed>`, `<item>`, or `<entry>`.
+5. Paste that URL into the source's optional RSS/Atom field. Use **RSS/Atom only** when the feed is reliable; otherwise leave **Auto** selected.
+
+Sitemaps are commonly advertised in `/robots.txt` or available at `/sitemap.xml`. A sitemap is useful for coverage but may contain non-news pages, so combine it with allowed paths and keywords. Discovery is bounded by depth `0–5` and a page budget of `1–500`; these limits apply independently to every configured source.
+
+Uploads support UTF-8 TXT, PDF, and DOCX files up to 10 MB. Website HTML is reduced to visible text; scripts and styles are removed. Extracted text is whitespace-normalized and identified by SHA-256. Repeated content from the same source returns the existing document rather than creating a duplicate. The hash is a content identifier, not a security credential.
+
+The relevant API surface is:
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET/POST` | `/api/sources` | List or create sources |
+| `GET/PATCH/DELETE` | `/api/sources/{id}` | Inspect, configure, enable, or remove a source |
+| `POST` | `/api/sources/{id}/collect` | Run one website source immediately |
+| `GET` | `/api/documents` | List normalized documents, optionally by `source_id` |
+| `POST` | `/api/documents/upload` | Extract and store TXT/PDF/DOCX content |
+| `POST` | `/api/documents/{id}/assess` | Assess relevance against the current network |
+| `PATCH` | `/api/documents/{id}/assessment` | Apply or clear a human relevance override |
+
+### Relevance and grounding boundary
+
+The relevance service sends the provider a compact context built from persisted node names, transport edges, and active shipment routes. `MockAIProvider` supplies deterministic structured fixtures. Probabilities at or above `0.7` are `RELEVANT`, values at or below `0.3` are `IRRELEVANT`, and intermediate values are `NEEDS_REVIEW`. Human overrides change the effective decision without erasing the provider output or rationale.
+
+Only effectively relevant documents can enter disruption extraction. Provider output contains human-readable locations, never trusted internal IDs. The backend resolves canonical node names and persisted aliases such as `Hai Phong`, `Port of Hai Phong`, and `VNHPH` to `hai-phong-port`. Unknown locations remain validation errors and cannot enter simulation state.
+
+### Candidate lifecycle, events, and provenance
+
+AI extraction writes only to `disruption_candidates`; it never writes directly to `disruptions`. Python validates disruption type, probability, severity, time ordering, document existence, grounded targets, and supported effect parameters. The lifecycle is:
+
+```text
+EXTRACTED → VALIDATED or INVALID → ACCEPTED or REJECTED
+```
+
+The Operations inbox shows confidence, probability, time window, deterministic downstream exposure, and every validation error. Operators can edit simulation-relevant values. Each edit stores the complete previous state in `candidate_versions` and re-runs grounding and validation. Only a `VALIDATED` candidate can be confirmed.
+
+Reports with the same disruption type, at least one common grounded entity, and overlapping time windows share an `intelligence_event`; every supporting document remains linked through `event_documents`. Candidate provenance exposes source, document, effective assessment, grouped event, version count, confirmed disruption, and any attached orchestration run.
+
+Candidate endpoints include:
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `POST` | `/api/disruption-candidates/from-document/{document_id}` | Extract, ground, validate, and group evidence |
+| `GET` | `/api/disruption-candidates` | List the operations inbox |
+| `PATCH` | `/api/disruption-candidates/{id}` | Version and revalidate an edit |
+| `POST` | `/api/disruption-candidates/{id}/reject` | Retain but reject evidence |
+| `POST` | `/api/disruption-candidates/{id}/confirm` | Create a persisted deterministic disruption |
+| `GET` | `/api/disruption-candidates/{id}/exposure` | Preview structural exposure before confirmation |
+| `GET` | `/api/disruption-candidates/{id}/versions` | Inspect immutable edit history |
+| `GET` | `/api/disruption-candidates/{id}/provenance` | Explain the evidence chain |
+| `POST` | `/api/disruption-candidates/{id}/confirm-and-run` | Confirm and start the existing decision workflow |
+
+The confirm-and-run path uses the existing observable run machinery. Progress is available through `GET /api/runs/{run_id}/events` as server-sent events, and generated plans still require explicit approval before execution. This repository deliberately stops at the mock provider boundary: it contains no real-model, Bedrock, AgentCore, or AWS-native ingestion adapter.
 
 ## Supply-chain workflow
 
@@ -260,6 +351,41 @@ It reliably grounds Hai Phong, exposes both seeded shipments, generates four sce
 
 Feature development intentionally stops here before any `bedrock.py` adapter. The repository contains no AWS SDK, Bedrock, or Bedrock AgentCore dependency.
 
+## Extensible network model
+
+The live digital twin can now be maintained at `/network/manage`. The responsive dark workspace has a topology overview with live counts, structured node and route cards, sticky creation panels, versioned schema summaries, and readable simulation-rule pipelines. Users can add and edit nodes and edges, preview dependency impact before deletion, create typed schemas, publish safe successor schema versions, and define deterministic metric rules. Graph changes are persisted immediately and are reflected by `GET /api/network`; seed data is no longer the only way to build the network.
+
+Nodes and edges retain their stable core fields and may additionally reference an immutable `schema_version_id` with an `attributes` JSON object. Custom data is validated against that exact version. Supported field types are `NUMBER`, `INTEGER`, `BOOLEAN`, `STRING`, and `ENUM`; numeric fields can be classified as `STATIC`, `STATE`, `FLOW`, or `METRIC`. Custom fields cannot shadow core fields.
+
+Schema definitions are never edited in place. A safe update creates `schema-id:v2`, migrates entities that referenced the prior current version, and fills newly introduced fields from declared defaults. A preview reports the entity count first. The first implementation permits additive fields, label changes, optional-to-required changes with defaults, and adding enum members. It rejects field removal, type changes, unit changes, behavior changes, and enum-member removal.
+
+Simulation extensions are declarative rather than executable user code. A rule selects a supported lifecycle trigger, one of `SET`, `ADD`, `SUBTRACT`, `MULTIPLY`, `MIN`, or `MAX`, a validated numeric source, and a custom result metric. The current execution hook is `EDGE_TRAVERSED`; the domain vocabulary reserves later lifecycle hooks but rejects them until the engine implements them. For example:
+
+```json
+{
+  "id": "accumulate-carbon",
+  "name": "Accumulate route carbon",
+  "trigger": "EDGE_TRAVERSED",
+  "operation": "ADD",
+  "source": "edge.attributes.carbon_emissions_kg",
+  "target_metric": "total_carbon_emissions_kg",
+  "enabled": true
+}
+```
+
+Simulation responses expose accumulated values under `custom_metrics`. Disruptions may also apply the fixed numeric operation vocabulary to declared numeric fields such as `edge.attributes.carbon_emissions_kg`; persistence rejects invented fields, wrong entity kinds, nonnumeric fields, and missing affected targets. Plan ranking remains based on built-in cost, delay, and tail-risk metrics.
+
+Every graph, schema, and rule mutation increments the persisted network context version. `services/ai_context.py` is the single source for compact filter context and detailed interpreter context, including authoritative IDs, routes, schemas, custom fields, and supported disruption effects. Large-context interpretation performs deterministic entity-name retrieval before constructing the prompt subset. This prevents either AI layer from inventing graph IDs or relying on stale independently assembled prompt context.
+
+The baseline seed creates Supplier, Port, Warehouse, Customer, Truck Route, Sea Route, and Air Route schemas and associates every seeded node and edge with its corresponding version. To try the full custom-metric path, create a numeric `FLOW` field on an edge schema, publish the version, set values on matching edges, add an `EDGE_TRAVERSED` rule, and run the baseline simulation.
+
+Automated coverage includes graph topology and dependency constraints, typed attribute validation, safe and unsafe schema changes, default migration, context invalidation and retrieval, rule source/trigger checks, every numeric operation, migration upgrade/downgrade, custom disruption validation, and an end-to-end carbon metric simulation. Run it with:
+
+```bash
+cd server
+../.venv/bin/pytest -q
+```
+
 ## API
 
 FastAPI exposes:
@@ -268,6 +394,21 @@ FastAPI exposes:
 - `GET /health/db` — PostgreSQL connectivity
 - `GET /api/network` — persisted nodes and edges
 - `GET /api/shipments` — persisted shipments
+- `POST /api/nodes` — create a validated live-network node
+- `PATCH /api/nodes/{id}` — edit a node without changing its ID
+- `GET /api/nodes/{id}/delete-impact` — preview node dependencies
+- `DELETE /api/nodes/{id}` — delete an unreferenced node
+- `POST /api/edges` — create a validated directed edge
+- `PATCH /api/edges/{id}` — edit edge topology or data
+- `GET /api/edges/{id}/delete-impact` — preview edge dependencies
+- `DELETE /api/edges/{id}` — delete an unused edge
+- `GET /api/schemas` — list current node and edge schema versions
+- `POST /api/schemas` — create a schema and immutable version one
+- `POST /api/schemas/{id}/versions/preview` — validate and preview migration impact
+- `POST /api/schemas/{id}/versions` — apply a safe successor version
+- `GET /api/simulation-rules` — list declarative rules
+- `POST /api/simulation-rules` — validate and create a rule
+- `GET /api/network/context-version` — current canonical AI-context version
 - `POST /api/simulations` — deterministic simulation using current disruptions
 - `GET /api/disruptions` — persisted disruptions
 - `POST /api/disruptions` — create or replace a disruption by ID

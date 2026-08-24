@@ -3,6 +3,7 @@
 import { useActionState } from "react";
 
 import { runBaselineSimulation } from "@/app/actions";
+import LoadingButton from "@/components/LoadingButton";
 import type { SimulationActionState } from "@/types/simulation";
 
 const initialState: SimulationActionState = {
@@ -37,13 +38,15 @@ export default function SimulationPanel() {
                 </div>
 
                 <form action={action}>
-                    <button
+                    <LoadingButton
                         type="submit"
                         disabled={pending}
+                        pending={pending}
+                        pendingLabel="Running simulation…"
                         className="rounded-xl bg-sky-700 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-800 disabled:cursor-wait disabled:opacity-60"
                     >
-                        {pending ? "Running simulation…" : "Run baseline simulation"}
-                    </button>
+                        Run baseline simulation
+                    </LoadingButton>
                 </form>
             </div>
 
@@ -73,6 +76,16 @@ export default function SimulationPanel() {
                             {state.result.late_shipments}
                         </dd>
                     </div>
+                    {Object.entries(state.result.custom_metrics).map(([name, value]) => (
+                        <div key={name}>
+                            <dt className="text-sm text-emerald-400">
+                                {name.replaceAll("_", " ")}
+                            </dt>
+                            <dd className="mt-1 text-2xl font-bold text-slate-100">
+                                {hoursFormatter.format(value)}
+                            </dd>
+                        </div>
+                    ))}
                 </dl>
             )}
         </section>

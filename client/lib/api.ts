@@ -8,6 +8,9 @@ import type {
     RankingWeights,
 } from "@/types/plan";
 import type { SimulationResult } from "@/types/simulation";
+import type { DataSource, DocumentAssessment, RawDocument } from "@/types/source";
+import type { DisruptionCandidate } from "@/types/candidate";
+import type { EntitySchema, SimulationRule } from "@/types/extensibility";
 
 async function fetchApi<T>(path: string, init?: RequestInit): Promise<T> {
     const backendUrl = process.env.BACKEND_URL ?? "http://localhost:8000";
@@ -38,6 +41,10 @@ export async function getSupplyChainData(): Promise<NetworkResponse> {
     );
 
     return { network, shipments, disruptions, exposures, scenarios, plans };
+}
+
+export async function getNetwork(): Promise<Network> {
+    return fetchApi<Network>("/api/network");
 }
 
 export async function requestBaselineSimulation(): Promise<SimulationResult> {
@@ -118,4 +125,40 @@ export async function setDisruptionEnabled(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled }),
     });
+}
+
+export async function getSources(): Promise<DataSource[]> {
+    return fetchApi<DataSource[]>("/api/sources");
+}
+
+export async function getDocuments(): Promise<RawDocument[]> {
+    return fetchApi<RawDocument[]>("/api/documents");
+}
+
+export async function getCandidates(): Promise<DisruptionCandidate[]> {
+    return fetchApi<DisruptionCandidate[]>("/api/disruption-candidates");
+}
+
+export async function getDocumentAssessment(
+    documentId: string,
+): Promise<DocumentAssessment> {
+    return fetchApi<DocumentAssessment>(
+        `/api/documents/${documentId}/assessment`,
+    );
+}
+
+export async function getCandidateExposure(
+    candidateId: string,
+): Promise<ExposureAnalysis> {
+    return fetchApi<ExposureAnalysis>(
+        `/api/disruption-candidates/${candidateId}/exposure`,
+    );
+}
+
+export async function getSchemas(): Promise<EntitySchema[]> {
+    return fetchApi<EntitySchema[]>("/api/schemas");
+}
+
+export async function getSimulationRules(): Promise<SimulationRule[]> {
+    return fetchApi<SimulationRule[]>("/api/simulation-rules");
 }

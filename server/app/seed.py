@@ -8,12 +8,17 @@ from app.database import SessionLocal
 from app.models import (
     DisruptionRecord,
     EdgeRecord,
+    EntityAliasRecord,
+    EntitySchemaRecord,
+    NetworkContextStateRecord,
     NodeRecord,
     PlanRecord,
     RunEventRecord,
     RunRecord,
     ScenarioRecord,
     ShipmentRecord,
+    SchemaVersionRecord,
+    SimulationRuleRecord,
 )
 
 
@@ -29,6 +34,36 @@ NODE_IDS = [
 def seed() -> None:
     """Replace all supply-chain records with the baseline synthetic network."""
 
+    now = datetime.now(timezone.utc)
+    schema_specs = (
+        ("node-supplier", "Supplier", "NODE"),
+        ("node-port", "Port", "NODE"),
+        ("node-warehouse", "Warehouse", "NODE"),
+        ("node-customer", "Customer", "NODE"),
+        ("edge-truck", "Truck Route", "EDGE"),
+        ("edge-sea", "Sea Route", "EDGE"),
+        ("edge-air", "Air Route", "EDGE"),
+    )
+    schemas = [
+        EntitySchemaRecord(
+            id=identifier,
+            name=name,
+            entity_kind=kind,
+            current_version_id=f"{identifier}:v1",
+            created_at=now,
+        )
+        for identifier, name, kind in schema_specs
+    ]
+    schema_versions = [
+        SchemaVersionRecord(
+            id=f"{identifier}:v1",
+            schema_id=identifier,
+            version=1,
+            fields=[],
+            created_at=now,
+        )
+        for identifier, _name, _kind in schema_specs
+    ]
     nodes = [
         NodeRecord(
             id="supplier-vn",
@@ -36,6 +71,8 @@ def seed() -> None:
             type="supplier",
             inventory=1200,
             capacity=2000,
+            schema_version_id="node-supplier:v1",
+            attributes={},
         ),
         NodeRecord(
             id="hai-phong-port",
@@ -43,6 +80,8 @@ def seed() -> None:
             type="port",
             inventory=400,
             capacity=6000,
+            schema_version_id="node-port:v1",
+            attributes={},
         ),
         NodeRecord(
             id="psa-singapore",
@@ -50,6 +89,8 @@ def seed() -> None:
             type="port",
             inventory=800,
             capacity=10000,
+            schema_version_id="node-port:v1",
+            attributes={},
         ),
         NodeRecord(
             id="ho-chi-minh-port",
@@ -57,6 +98,8 @@ def seed() -> None:
             type="port",
             inventory=200,
             capacity=5000,
+            schema_version_id="node-port:v1",
+            attributes={},
         ),
         NodeRecord(
             id="singapore-warehouse",
@@ -64,6 +107,8 @@ def seed() -> None:
             type="warehouse",
             inventory=600,
             capacity=3000,
+            schema_version_id="node-warehouse:v1",
+            attributes={},
         ),
         NodeRecord(
             id="customer",
@@ -71,6 +116,8 @@ def seed() -> None:
             type="customer",
             inventory=100,
             capacity=1000,
+            schema_version_id="node-customer:v1",
+            attributes={},
         ),
     ]
     edges = [
@@ -82,6 +129,8 @@ def seed() -> None:
             transit_time_hours=4,
             cost=250,
             capacity=800,
+            schema_version_id="edge-truck:v1",
+            attributes={},
         ),
         EdgeRecord(
             id="02-hai-phong-to-psa",
@@ -91,6 +140,8 @@ def seed() -> None:
             transit_time_hours=36,
             cost=1800,
             capacity=5000,
+            schema_version_id="edge-sea:v1",
+            attributes={},
         ),
         EdgeRecord(
             id="03-psa-to-warehouse",
@@ -100,6 +151,8 @@ def seed() -> None:
             transit_time_hours=1,
             cost=180,
             capacity=1200,
+            schema_version_id="edge-truck:v1",
+            attributes={},
         ),
         EdgeRecord(
             id="04-warehouse-to-customer",
@@ -109,6 +162,8 @@ def seed() -> None:
             transit_time_hours=1,
             cost=90,
             capacity=500,
+            schema_version_id="edge-truck:v1",
+            attributes={},
         ),
         EdgeRecord(
             id="05-supplier-to-ho-chi-minh",
@@ -118,6 +173,8 @@ def seed() -> None:
             transit_time_hours=6,
             cost=300,
             capacity=800,
+            schema_version_id="edge-truck:v1",
+            attributes={},
         ),
         EdgeRecord(
             id="06-ho-chi-minh-to-psa",
@@ -127,6 +184,8 @@ def seed() -> None:
             transit_time_hours=30,
             cost=2300,
             capacity=4000,
+            schema_version_id="edge-sea:v1",
+            attributes={},
         ),
         EdgeRecord(
             id="07-supplier-to-psa-air",
@@ -136,6 +195,8 @@ def seed() -> None:
             transit_time_hours=8,
             cost=9000,
             capacity=600,
+            schema_version_id="edge-air:v1",
+            attributes={},
         ),
     ]
     shipments = [
@@ -235,8 +296,32 @@ def seed() -> None:
         session.execute(delete(ShipmentRecord))
         session.execute(delete(EdgeRecord))
         session.execute(delete(NodeRecord))
+        session.execute(delete(EntityAliasRecord))
+        session.execute(delete(SimulationRuleRecord))
+        session.execute(delete(SchemaVersionRecord))
+        session.execute(delete(EntitySchemaRecord))
+        session.execute(delete(NetworkContextStateRecord))
+        session.add_all(schemas)
+        session.add_all(schema_versions)
+        session.flush()
         session.add_all(nodes)
         session.flush()
+        session.add_all(
+            [
+                EntityAliasRecord(
+                    alias=alias,
+                    entity_type="NODE",
+                    entity_id="hai-phong-port",
+                    created_at=datetime.now(timezone.utc),
+                )
+                for alias in (
+                    "hai phong",
+                    "hai phong port",
+                    "port of hai phong",
+                    "vnhph",
+                )
+            ]
+        )
         session.add_all(edges)
         session.add_all(shipments)
         session.add_all(scenarios)

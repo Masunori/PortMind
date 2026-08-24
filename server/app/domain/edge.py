@@ -13,3 +13,5 @@ class Edge(BaseModel):
     transit_time_hours: float = Field(gt=0)
     cost: float = Field(ge=0)
     capacity: float = Field(ge=0)
+    schema_version_id: str | None = None
+    attributes: dict[str, object] = Field(default_factory=dict)

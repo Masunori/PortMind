@@ -42,3 +42,25 @@ class InterpretedSignal(BaseModel):
         if minimum is not None and maximum is not None and maximum < minimum:
             raise ValueError("Maximum duration must not be below minimum duration")
         return self
+
+
+class RelevanceAssessment(BaseModel):
+    """Provider assessment of operational relevance to the current network."""
+
+    relevance_probability: float = Field(ge=0, le=1)
+    rationale: str = Field(min_length=1)
+    matched_entities: list[str] = Field(default_factory=list)
+
+
+class DisruptionExtraction(BaseModel):
+    """Human-readable disruption facts proposed from one relevant document."""
+
+    disruption_type: str
+    affected_locations: list[str] = Field(min_length=1)
+    start_time_hours: float = Field(ge=0)
+    end_time_hours: float = Field(gt=0)
+    probability: float
+    severity: float
+    effects: dict[str, object]
+    summary: str = Field(min_length=1)
+    confidence: float

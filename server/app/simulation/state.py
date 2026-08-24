@@ -13,3 +13,4 @@ class SimulationState:
     shipment_locations: dict[str, str] = field(default_factory=dict)
     lead_times: dict[str, float] = field(default_factory=dict)
     late_shipments: set[str] = field(default_factory=set)
+    custom_metrics: dict[str, float] = field(default_factory=dict)

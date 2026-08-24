@@ -7,6 +7,7 @@ import {
     toggleBaselineDisruption,
 } from "@/app/actions";
 import type { Disruption, DisruptionActionState } from "@/types/disruption";
+import LoadingButton from "@/components/LoadingButton";
 
 const initialState: DisruptionActionState = {
     disruption: null,
@@ -57,28 +58,30 @@ export default function DisruptionPanel({ disruptions }: DisruptionPanelProps) {
                             name="enabled"
                             value={configuredDisruption.enabled ? "false" : "true"}
                         />
-                        <button
+                        <LoadingButton
                             type="submit"
                             disabled={toggling}
+                            pending={toggling}
+                            pendingLabel="Updating…"
                             aria-pressed={configuredDisruption.enabled}
                             className={`rounded-xl px-5 py-3 text-sm font-semibold text-white shadow-sm transition disabled:cursor-wait disabled:opacity-60 ${configuredDisruption.enabled ? "bg-red-600 hover:bg-red-700" : "bg-emerald-600 hover:bg-emerald-700"}`}
                         >
-                            {toggling
-                                ? "Updating…"
-                                : configuredDisruption.enabled
-                                    ? "Disable disruption"
-                                    : "Enable disruption"}
-                        </button>
+                            {configuredDisruption.enabled
+                                ? "Disable disruption"
+                                : "Enable disruption"}
+                        </LoadingButton>
                     </form>
                 ) : (
                     <form action={injectAction}>
-                        <button
+                        <LoadingButton
                             type="submit"
                             disabled={injecting}
+                            pending={injecting}
+                            pendingLabel="Injecting…"
                             className="rounded-xl bg-amber-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-700 disabled:cursor-wait disabled:opacity-60"
                         >
-                            {injecting ? "Injecting…" : "Inject"}
-                        </button>
+                            Inject
+                        </LoadingButton>
                     </form>
                 )}
             </div>

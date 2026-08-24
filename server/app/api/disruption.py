@@ -23,7 +23,10 @@ router = APIRouter(prefix="/api", tags=["disruptions"])
 def create_disruption(disruption: Disruption) -> Disruption:
     """Persist a new disruption or replace one with the same identifier."""
 
-    return save_disruption(disruption)
+    try:
+        return save_disruption(disruption)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 @router.get("/disruptions", response_model=list[Disruption])

@@ -17,6 +17,22 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+button:disabled {
+  pointer-events: none;
+  user-select: none;
+}
+
+button[aria-busy="true"] {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-spin {
+    animation-duration: 1.5s;
+  }
+}
+
 .react-flow__controls {
   border: 1px solid #334155;
   box-shadow: none;

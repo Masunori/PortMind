@@ -8,6 +8,8 @@ export type Node = {
     type: string;
     inventory: number;
     capacity: number;
+    schema_version_id: string | null;
+    attributes: Record<string, unknown>;
 };
 
 export type Edge = {
@@ -18,6 +20,8 @@ export type Edge = {
     transit_time_hours: number;
     cost: number;
     capacity: number;
+    schema_version_id: string | null;
+    attributes: Record<string, unknown>;
 };
 
 export type Shipment = {

@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Query
 from app.services.disruption_service import get_disruptions
 from app.services.network_service import get_network, get_shipments
 from app.simulation import SimulationResult, simulate
+from app.services.rule_service import get_rules
 
 router = APIRouter(prefix="/api", tags=["simulations"])
 
@@ -21,6 +22,7 @@ def run_simulation(
             shipments=get_shipments(),
             horizon_hours=horizon_hours,
             disruptions=get_disruptions(enabled_only=True),
+            rules=get_rules(enabled_only=True),
         )
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error

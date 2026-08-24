@@ -11,3 +11,4 @@ class SimulationResult(BaseModel):
     average_delay_hours: float = Field(ge=0)
     late_shipments: int = Field(ge=0)
     final_inventory: dict[str, float]
+    custom_metrics: dict[str, float] = Field(default_factory=dict)

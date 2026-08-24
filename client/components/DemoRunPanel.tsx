@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import LoadingButton from "@/components/LoadingButton";
 import type { Plan } from "@/types/plan";
 import type { RunEvent, RunEventType, RunResponse } from "@/types/run";
 
@@ -36,8 +37,9 @@ function backendUrl(): string {
 export default function DemoRunPanel() {
     const [run, setRun] = useState<RunResponse | null>(null);
     const [events, setEvents] = useState<RunEvent[]>([]);
-    const [busy, setBusy] = useState(false);
+    const [busyAction, setBusyAction] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const busy = busyAction !== null;
 
     async function loadRun(runId: string): Promise<void> {
         const response = await fetch(`${backendUrl()}/api/runs/${runId}`);
@@ -61,19 +63,19 @@ export default function DemoRunPanel() {
                     source.close();
                     void loadRun(runId)
                         .catch((caught) => setError(caught instanceof Error ? caught.message : "Run refresh failed"))
-                        .finally(() => setBusy(false));
+                        .finally(() => setBusyAction(null));
                 }
             });
         }
         source.onerror = () => {
             source.close();
             setError("Run event stream disconnected");
-            setBusy(false);
+            setBusyAction(null);
         };
     }
 
     async function injectDemoSignal(): Promise<void> {
-        setBusy(true);
+        setBusyAction("inject");
         setError(null);
         setEvents([]);
         setRun(null);
@@ -91,12 +93,12 @@ export default function DemoRunPanel() {
             observeRun(generated.run_id);
         } catch (caught) {
             setError(caught instanceof Error ? caught.message : "Demo run failed");
-            setBusy(false);
+            setBusyAction(null);
         }
     }
 
     async function resetDemo(): Promise<void> {
-        setBusy(true);
+        setBusyAction("reset");
         setError(null);
         try {
             const response = await fetch(`${backendUrl()}/api/demo/reset`, {
@@ -110,25 +112,30 @@ export default function DemoRunPanel() {
             window.location.reload();
         } catch (caught) {
             setError(caught instanceof Error ? caught.message : "Demo reset failed");
-            setBusy(false);
+            setBusyAction(null);
         }
     }
 
     async function decidePlan(plan: Plan, decision: "approve" | "reject"): Promise<void> {
+        setBusyAction(`decision:${decision}`);
         setError(null);
-        const response = await fetch(
-            `${backendUrl()}/api/plans/${plan.id}/${decision}`,
-            { method: "POST" },
-        );
-        if (!response.ok) {
-            setError(`Unable to ${decision} plan (${response.status})`);
-            return;
+        try {
+            const response = await fetch(
+                `${backendUrl()}/api/plans/${plan.id}/${decision}`,
+                { method: "POST" },
+            );
+            if (!response.ok) {
+                setError(`Unable to ${decision} plan (${response.status})`);
+                return;
+            }
+            const updated = (await response.json()) as Plan;
+            setRun((current) => current ? {
+                ...current,
+                plans: current.plans.map((item) => item.id === updated.id ? updated : item),
+            } : current);
+        } finally {
+            setBusyAction(null);
         }
-        const updated = (await response.json()) as Plan;
-        setRun((current) => current ? {
-            ...current,
-            plans: current.plans.map((item) => item.id === updated.id ? updated : item),
-        } : current);
     }
 
     const eventTypes = new Set(events.map((event) => event.type));
@@ -152,22 +159,26 @@ export default function DemoRunPanel() {
                     <p className="mt-1 text-sm text-slate-400">{DEMO_SIGNAL}</p>
                 </div>
                 <div className="flex gap-3">
-                    <button
+                    <LoadingButton
                         type="button"
                         disabled={busy}
+                        pending={busyAction === "reset"}
+                        pendingLabel="Resetting…"
                         onClick={() => void resetDemo()}
                         className="rounded-xl border border-slate-600 bg-slate-900 px-4 py-3 text-sm font-semibold text-slate-200 hover:bg-slate-800 disabled:opacity-50"
                     >
                         Reset Demo
-                    </button>
-                    <button
+                    </LoadingButton>
+                    <LoadingButton
                         type="button"
                         disabled={busy}
+                        pending={busyAction === "inject"}
+                        pendingLabel="Running workflow…"
                         onClick={() => void injectDemoSignal()}
                         className="rounded-xl bg-cyan-700 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-600 disabled:opacity-50"
                     >
-                        {busy ? "Running…" : "Inject Demo Signal"}
-                    </button>
+                        Inject Demo Signal
+                    </LoadingButton>
                 </div>
             </div>
 
@@ -197,12 +208,12 @@ export default function DemoRunPanel() {
                                 <p className="font-bold text-emerald-200">{recommended.name} ★</p>
                                 <p className="mt-1 text-xs text-emerald-400">{recommended.status}</p>
                                 <div className="mt-3 flex gap-2">
-                                    <button type="button" onClick={() => void decidePlan(recommended, "approve")} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white">
+                                    <LoadingButton type="button" disabled={busy} pending={busyAction === "decision:approve"} pendingLabel="Approving…" onClick={() => void decidePlan(recommended, "approve")} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white">
                                         Approve
-                                    </button>
-                                    <button type="button" onClick={() => void decidePlan(recommended, "reject")} className="rounded-lg bg-red-800 px-3 py-2 text-xs font-semibold text-white">
+                                    </LoadingButton>
+                                    <LoadingButton type="button" disabled={busy} pending={busyAction === "decision:reject"} pendingLabel="Rejecting…" onClick={() => void decidePlan(recommended, "reject")} className="rounded-lg bg-red-800 px-3 py-2 text-xs font-semibold text-white">
                                         Reject
-                                    </button>
+                                    </LoadingButton>
                                 </div>
                             </div>
                         ) : (

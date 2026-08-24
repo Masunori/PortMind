@@ -8,6 +8,7 @@ import SimulationPanel from "@/components/SimulationPanel";
 import ScenarioTable from "@/components/ScenarioTable";
 import { getSupplyChainData } from "@/lib/api";
 import type { NetworkResponse } from "@/types/network";
+import Link from "next/link";
 
 type LoadResult =
     | { data: NetworkResponse }
@@ -56,6 +57,15 @@ export default async function Home() {
                     {network.nodes.length} nodes · {network.edges.length} routes ·{" "}
                     {shipments.length} shipments · {disruptions.length} disruptions
                 </p>
+                <Link href="/sources" className="rounded-lg border border-sky-800 px-4 py-2 text-sm text-sky-300 hover:bg-sky-950">
+                    Intelligence sources
+                </Link>
+                <Link href="/network/manage" className="rounded-lg border border-emerald-800 px-4 py-2 text-sm text-emerald-300 hover:bg-emerald-950">
+                    Manage network
+                </Link>
+                <Link href="/disruptions/candidates" className="rounded-lg border border-amber-800 px-4 py-2 text-sm text-amber-300 hover:bg-amber-950">
+                    Operations inbox
+                </Link>
             </header>
 
             <section className="mx-auto grid max-w-[1800px] gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(420px,0.9fr)] lg:items-start">

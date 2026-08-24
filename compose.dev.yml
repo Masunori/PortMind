@@ -24,6 +24,7 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://psa:psa@database:5432/psa
       CLIENT_ORIGIN: http://localhost:3000
+      ENABLE_SOURCE_SCHEDULER: "true"
     ports:
       - "8000:8000"
     volumes:

@@ -4,6 +4,7 @@ export type SimulationResult = {
     average_delay_hours: number;
     late_shipments: number;
     final_inventory: Record<string, number>;
+    custom_metrics: Record<string, number>;
 };
 
 export type SimulationActionState =

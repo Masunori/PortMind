@@ -4,11 +4,22 @@ from enum import Enum
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.domain.rule import RuleOperation
+
+
+class CustomFieldEffect(BaseModel):
+    """Apply a fixed numeric operation to a declared entity attribute."""
+
+    target_field: str = Field(pattern=r"^(node|edge)\.attributes\.[a-z][a-z0-9_]{0,63}$")
+    operation: RuleOperation
+    value: float
+
 
 class DisruptionType(str, Enum):
     """Identify the supported classes of supply-chain disruption."""
 
     PORT_CONGESTION = "PORT_CONGESTION"
+    PORT_CLOSURE = "PORT_CLOSURE"
     EDGE_CLOSURE = "EDGE_CLOSURE"
     TRANSIT_DELAY = "TRANSIT_DELAY"
     NODE_DELAY = "NODE_DELAY"
@@ -23,12 +34,13 @@ class DisruptionEffects(BaseModel):
     node_handling_delay_hours: float | None = Field(default=None, ge=0)
     handling_time_multiplier: float | None = Field(default=None, gt=0)
     capacity_multiplier: float | None = Field(default=None, gt=0)
+    custom_effects: list[CustomFieldEffect] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def require_effect(self) -> "DisruptionEffects":
         """Require at least one effect that changes simulation behavior."""
 
-        if not self.edge_disabled and all(
+        if not self.edge_disabled and not self.custom_effects and all(
             value is None
             for value in (
                 self.transit_time_multiplier,
