@@ -1,12 +1,26 @@
 """Tests for source validation, persistence, and HTTP behavior."""
 
+import asyncio
 from datetime import timedelta
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
 
 from app.api import source as source_api
-from app.domain.source import DataSourceCreate, DataSourceUpdate, SourceType
+from app.domain.source import (
+    DataSourceCreate,
+    DataSourceUpdate,
+    SourceCollectionResult,
+    SourceProcessingError,
+    SourceProcessingSummary,
+    SourceType,
+)
+from app.integrations.contracts import EvidenceCreate, EvidenceKind
+from app.integrations.gemini import GeminiRateLimitError
+from app.services import collection_service
+from app.services import scheduler_service
+from app.services.evidence_service import store_evidence
 from app.services.source_service import (
     create_source,
     delete_source,
@@ -26,6 +40,10 @@ def website(name: str = "Port notices", interval: int = 30) -> DataSourceCreate:
         scrape_interval_minutes=interval,
         scraper_type="HTML",
     )
+
+
+def run(value):
+    return asyncio.run(value)
 
 
 def test_source_type_specific_validation() -> None:
@@ -164,3 +182,240 @@ def test_source_api_crud(test_session_factory) -> None:
     with pytest.raises(Exception) as error:
         source_api.source(result.id)
     assert error.value.status_code == 404
+
+
+def test_collection_processes_new_evidence_and_skips_duplicates(
+    test_session_factory, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A scrape hands each original evidence item to the signal pipeline once."""
+
+    source = create_source(website())
+    original, _ = store_evidence(EvidenceCreate(
+        source_id=source.id, kind=EvidenceKind.WEBSITE, title="Port alert",
+        media_type="text/plain", content="Hai Phong port may close tomorrow",
+    ))
+    duplicate, is_duplicate = store_evidence(EvidenceCreate(
+        source_id=source.id, kind=EvidenceKind.WEBSITE, title="Copied alert",
+        media_type="text/plain", content="Hai Phong port may close tomorrow",
+    ))
+    assert is_duplicate is True
+    collection = SourceCollectionResult(
+        source_id=source.id, evidence=[original, duplicate], discovered_urls=2,
+        fetched_pages=2, skipped_urls=0, created_evidence=1, duplicate_evidence=1,
+    )
+    processed: list[str] = []
+
+    async def collect(_source):
+        return collection
+
+    async def process(evidence_id, **_dependencies):
+        processed.append(evidence_id)
+
+    monkeypatch.setattr(collection_service, "discover_and_scrape_source", collect)
+    monkeypatch.setattr(collection_service, "process_evidence", process)
+
+    result = run(collection_service.collect_and_process_source(
+        source, gateway=object(), providers=object(),
+    ))
+
+    assert processed == [original.id]
+    assert result.errors == []
+    assert result.processing.attempted == 1
+    assert result.processing.filtered_out == 1
+
+
+@pytest.mark.parametrize(
+    ("outcome", "field"),
+    [
+        ("READY_FOR_REVIEW", "ready_for_review"),
+        (None, "filtered_out"),
+        ("NEEDS_RESOLUTION", "needs_resolution"),
+        ("MAPPING_FAILED", "mapping_failed"),
+    ],
+)
+def test_collection_summarizes_processing_outcomes(
+    test_session_factory,
+    monkeypatch: pytest.MonkeyPatch,
+    outcome: str | None,
+    field: str,
+) -> None:
+    """Each supported terminal outcome is counted without becoming an error."""
+
+    source = create_source(website())
+    evidence, _ = store_evidence(EvidenceCreate(
+        source_id=source.id, kind=EvidenceKind.WEBSITE, title="Notice",
+        media_type="text/plain", content=f"Unique notice for {outcome}",
+    ))
+    collection = SourceCollectionResult(
+        source_id=source.id, evidence=[evidence], discovered_urls=1,
+        fetched_pages=1, skipped_urls=0, created_evidence=1, duplicate_evidence=0,
+        errors=["one page could not be fetched"],
+    )
+
+    async def collect(_source):
+        return collection
+
+    async def process(_evidence_id, **_dependencies):
+        return None if outcome is None else SimpleNamespace(processing_state=outcome)
+
+    monkeypatch.setattr(collection_service, "discover_and_scrape_source", collect)
+    monkeypatch.setattr(collection_service, "process_evidence", process)
+    result = run(collection_service.collect_and_process_source(
+        source, gateway=object(), providers=object(),
+    ))
+
+    assert result.processing.attempted == 1
+    assert getattr(result.processing, field) == 1
+    assert result.processing.failed == 0
+    assert result.processing.errors == []
+    assert result.errors == ["one page could not be fetched"]
+
+
+def test_collection_records_failure_and_continues(
+    test_session_factory, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unexpected item failure is safe, separate, and does not stop later items."""
+
+    source = create_source(website())
+    first, _ = store_evidence(EvidenceCreate(
+        source_id=source.id, kind=EvidenceKind.WEBSITE, title="First",
+        media_type="text/plain", content="First unique processing failure",
+    ))
+    second, _ = store_evidence(EvidenceCreate(
+        source_id=source.id, kind=EvidenceKind.WEBSITE, title="Second",
+        media_type="text/plain", content="Second unique processing success",
+    ))
+    collection = SourceCollectionResult(
+        source_id=source.id, evidence=[first, second], discovered_urls=2,
+        fetched_pages=2, skipped_urls=0, created_evidence=2, duplicate_evidence=0,
+        errors=["discovery warning"],
+    )
+    calls: list[str] = []
+    logged: list[tuple[str, str]] = []
+
+    async def collect(_source):
+        return collection
+
+    async def process(evidence_id, **_dependencies):
+        calls.append(evidence_id)
+        if evidence_id == first.id:
+            raise RuntimeError("provider credential must not reach the browser")
+        return SimpleNamespace(processing_state="READY_FOR_REVIEW")
+
+    monkeypatch.setattr(collection_service, "discover_and_scrape_source", collect)
+    monkeypatch.setattr(collection_service, "process_evidence", process)
+    monkeypatch.setattr(collection_service.logger, "exception",
+        lambda message, evidence_id: logged.append((message, evidence_id)))
+    result = run(collection_service.collect_and_process_source(
+        source, gateway=object(), providers=object(),
+    ))
+
+    assert calls == [first.id, second.id]
+    assert result.processing.attempted == 2
+    assert result.processing.ready_for_review == 1
+    assert result.processing.failed == 1
+    assert result.processing.errors == [SourceProcessingError(
+        evidence_id=first.id, message="Processing failed unexpectedly",
+    )]
+    assert result.errors == ["discovery warning"]
+    assert logged == [("Unexpected failure processing evidence %s", first.id)]
+
+
+def test_collection_defers_remaining_items_after_exhausted_gemini_quota(
+    test_session_factory, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One shared quota failure avoids repeatedly calling Gemini for the batch."""
+
+    source = create_source(website())
+    items = [store_evidence(EvidenceCreate(
+        source_id=source.id, kind=EvidenceKind.WEBSITE, title=f"Item {index}",
+        media_type="text/plain", content=f"Unique quota item {index}",
+    ))[0] for index in range(3)]
+    collection = SourceCollectionResult(
+        source_id=source.id, evidence=items, discovered_urls=3,
+        fetched_pages=3, skipped_urls=0, created_evidence=3,
+        duplicate_evidence=0,
+    )
+    calls = []
+
+    async def collect(_source):
+        return collection
+
+    async def process(evidence_id, **_dependencies):
+        calls.append(evidence_id)
+        raise GeminiRateLimitError(
+            "Gemini rate limit or quota exhausted: minute quota",
+            status_code=429, retryable=True,
+        )
+
+    monkeypatch.setattr(collection_service, "discover_and_scrape_source", collect)
+    monkeypatch.setattr(collection_service, "process_evidence", process)
+    result = run(collection_service.collect_and_process_source(
+        source, gateway=object(), providers=object(),
+    ))
+
+    assert calls == [items[0].id]
+    assert result.processing.attempted == 1
+    assert result.processing.deferred == 3
+    assert result.processing.failed == 0
+    assert len(result.processing.errors) == 3
+    assert "quota exhausted" in result.processing.errors[0].message
+    assert "deferred" in result.processing.errors[1].message.casefold()
+
+
+def test_collection_treats_unknown_processing_state_as_failure(
+    test_session_factory, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A new unsupported state is visible instead of silently disappearing."""
+
+    source = create_source(website())
+    evidence, _ = store_evidence(EvidenceCreate(
+        source_id=source.id, kind=EvidenceKind.WEBSITE, title="Unknown",
+        media_type="text/plain", content="Unique unknown processing state",
+    ))
+    collection = SourceCollectionResult(
+        source_id=source.id, evidence=[evidence], discovered_urls=1,
+        fetched_pages=1, skipped_urls=0, created_evidence=1, duplicate_evidence=0,
+    )
+
+    async def collect(_source): return collection
+    async def process(_evidence_id, **_dependencies):
+        return SimpleNamespace(processing_state="INTERPRETED")
+
+    monkeypatch.setattr(collection_service, "discover_and_scrape_source", collect)
+    monkeypatch.setattr(collection_service, "process_evidence", process)
+    result = run(collection_service.collect_and_process_source(
+        source, gateway=object(), providers=object(),
+    ))
+    assert result.processing.failed == 1
+    assert result.processing.errors[0].evidence_id == evidence.id
+    assert "INTERPRETED" in result.processing.errors[0].message
+
+
+def test_scheduler_retains_unexpected_processing_failure(
+    test_session_factory, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Scheduled processing exceptions affect health while normal outcomes do not."""
+
+    source = create_source(website())
+    recorded: list[tuple[str, str | None]] = []
+    monkeypatch.setattr(scheduler_service, "get_due_sources", lambda _now: [source])
+    monkeypatch.setattr(
+        scheduler_service, "record_source_run",
+        lambda source_id, error=None: recorded.append((source_id, error)),
+    )
+
+    async def collector(_source, _gateway, _providers):
+        return SourceCollectionResult(
+            source_id=source.id, evidence=[], discovered_urls=0, fetched_pages=0,
+            skipped_urls=0, created_evidence=0, duplicate_evidence=0,
+            processing=SourceProcessingSummary(failed=1, errors=[
+                SourceProcessingError(evidence_id="evidence-1", message="safe failure")
+            ]),
+        )
+
+    count = run(scheduler_service.collect_due_sources(
+        collector=collector, gateway=object(), providers=object(),
+    ))
+    assert count == 1
+    assert recorded == [(source.id, "1 evidence item(s) failed processing unexpectedly")]

@@ -17,7 +17,37 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+button {
+  cursor: pointer;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    box-shadow 150ms ease,
+    filter 150ms ease,
+    transform 150ms ease;
+}
+
+button:not(:disabled):hover {
+  background-image: linear-gradient(rgb(255 255 255 / 10%), rgb(255 255 255 / 10%));
+  border-color: rgb(148 163 184 / 80%);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 25%);
+  filter: brightness(1.12);
+  transform: translateY(-1px);
+}
+
+button:not(:disabled):active {
+  box-shadow: none;
+  filter: brightness(0.95);
+  transform: translateY(0);
+}
+
+button:focus-visible {
+  outline: 2px solid #38bdf8;
+  outline-offset: 2px;
+}
+
 button:disabled {
+  cursor: not-allowed;
   pointer-events: none;
   user-select: none;
 }
@@ -28,22 +58,16 @@ button[aria-busy="true"] {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  button {
+    transition: none;
+  }
+
+  button:not(:disabled):hover,
+  button:not(:disabled):active {
+    transform: none;
+  }
+
   .animate-spin {
     animation-duration: 1.5s;
   }
-}
-
-.react-flow__controls {
-  border: 1px solid #334155;
-  box-shadow: none;
-}
-
-.react-flow__controls-button {
-  border-bottom-color: #334155;
-  background: #0f172a;
-  fill: #cbd5e1;
-}
-
-.react-flow__controls-button:hover {
-  background: #1e293b;
 }

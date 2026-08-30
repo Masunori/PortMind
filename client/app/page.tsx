@@ -1,105 +1,23 @@
-import DisruptionPanel from "@/components/DisruptionPanel";
-import DemoRunPanel from "@/components/DemoRunPanel";
-import ExposureAlert from "@/components/ExposureAlert";
-import PlanComparisonMatrix from "@/components/PlanComparisonMatrix";
-import PlanRankingTable from "@/components/PlanRankingTable";
-import SupplyChainGraph from "@/components/SupplyChainGraph";
-import SimulationPanel from "@/components/SimulationPanel";
-import ScenarioTable from "@/components/ScenarioTable";
-import { getSupplyChainData } from "@/lib/api";
-import type { NetworkResponse } from "@/types/network";
-import Link from "next/link";
+import { getClientConnection, type ClientConnection } from "@/lib/api";
 
-type LoadResult =
-    | { data: NetworkResponse }
-    | { error: string };
-
-async function loadData(): Promise<LoadResult> {
+async function connection(): Promise<ClientConnection> {
     try {
-        return { data: await getSupplyChainData() };
-    } catch (error) {
+        return await getClientConnection();
+    } catch {
         return {
-            error: error instanceof Error ? error.message : "FastAPI is unavailable",
+            status: "degraded", client_id: null, context_version: null,
+            schema_version: null, state_version: null, capability_version: null,
+            last_successful_response_at: null, error_code: "PLATFORM_UNAVAILABLE",
         };
     }
 }
 
 export default async function Home() {
-    const result = await loadData();
-
-    if ("error" in result) {
-        return (
-            <main className="flex min-h-screen items-center justify-center bg-slate-950 p-8">
-                <section className="rounded-2xl border border-red-800 bg-slate-900 p-8 text-center shadow-2xl shadow-black/30">
-                    <h1 className="text-xl font-bold text-slate-100">
-                        Supply-chain network unavailable
-                    </h1>
-                    <p className="mt-2 text-sm text-red-300">{result.error}</p>
-                </section>
-            </main>
-        );
-    }
-
-    const { network, shipments, disruptions, exposures, scenarios, plans } = result.data;
-
-    return (
-        <main className="min-h-screen bg-slate-950 px-4 py-6 text-slate-100 lg:px-6">
-            <header className="mx-auto mb-6 flex max-w-[1800px] flex-wrap items-end justify-between gap-6">
-                <div>
-                    <p className="text-sm font-semibold uppercase tracking-[0.2em] text-sky-400">
-                        PSA ESG Platform
-                    </p>
-                    <h1 className="mt-2 text-3xl font-bold tracking-tight">
-                        Supply-chain network
-                    </h1>
-                </div>
-                <p className="rounded-full border border-slate-700 bg-slate-900 px-4 py-2 text-sm text-slate-400">
-                    {network.nodes.length} nodes · {network.edges.length} routes ·{" "}
-                    {shipments.length} shipments · {disruptions.length} disruptions
-                </p>
-                <Link href="/sources" className="rounded-lg border border-sky-800 px-4 py-2 text-sm text-sky-300 hover:bg-sky-950">
-                    Intelligence sources
-                </Link>
-                <Link href="/network/manage" className="rounded-lg border border-emerald-800 px-4 py-2 text-sm text-emerald-300 hover:bg-emerald-950">
-                    Manage network
-                </Link>
-                <Link href="/disruptions/candidates" className="rounded-lg border border-amber-800 px-4 py-2 text-sm text-amber-300 hover:bg-amber-950">
-                    Operations inbox
-                </Link>
-            </header>
-
-            <section className="mx-auto grid max-w-[1800px] gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(420px,0.9fr)] lg:items-start">
-                <div className="min-w-0 lg:sticky lg:top-6">
-                    <SupplyChainGraph
-                        network={network}
-                        disruptions={disruptions}
-                        exposures={exposures}
-                    />
-                </div>
-
-                <div className="min-w-0 lg:max-h-[calc(100vh-9.5rem)] lg:overflow-y-auto lg:pr-2">
-                    <DemoRunPanel />
-                    {exposures.map((exposure) => {
-                        const disruption = disruptions.find(
-                            (item) => item.id === exposure.disruption_id,
-                        );
-
-                        return disruption ? (
-                            <ExposureAlert
-                                key={exposure.disruption_id}
-                                disruption={disruption}
-                                exposure={exposure}
-                                network={network}
-                            />
-                        ) : null;
-                    })}
-                    <DisruptionPanel disruptions={disruptions} />
-                    <SimulationPanel />
-                    <ScenarioTable scenarios={scenarios} />
-                    <PlanComparisonMatrix plans={plans} scenarios={scenarios} />
-                    <PlanRankingTable />
-                </div>
-            </section>
-        </main>
-    );
+    const client = await connection();
+    const versions = [["Context", client.context_version], ["Schema", client.schema_version],
+        ["State", client.state_version], ["Capabilities", client.capability_version]];
+    return <main className="min-h-screen bg-slate-950 px-6 py-12 text-slate-100"><div className="mx-auto max-w-5xl">
+        <header className="flex flex-wrap items-end justify-between gap-6"><div><p className="text-sm font-semibold uppercase tracking-[0.2em] text-sky-400">AEGIS Platform</p><h1 className="mt-2 text-4xl font-bold">Client connection</h1><p className="mt-3 max-w-2xl text-slate-400">Operational data and authoritative simulation remain in the connected client. This platform stores evidence, reviewed signals, immutable experiments, and normalized result copies.</p></div><span className={`rounded-full border px-4 py-2 text-sm ${client.status === "ok" ? "border-emerald-700 bg-emerald-950 text-emerald-300" : "border-red-800 bg-red-950 text-red-300"}`}>{client.status === "ok" ? "Connected" : "Connection degraded"}</span></header>
+        <section className="mt-10 rounded-2xl border border-slate-800 bg-slate-900 p-6"><p className="text-sm text-slate-400">Client identity</p><p className="mt-1 text-xl font-semibold">{client.client_id ?? "Unavailable"}</p><dl className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{versions.map(([label, value]) => <div key={label} className="rounded-xl bg-slate-950 p-4"><dt className="text-xs uppercase tracking-wide text-slate-500">{label}</dt><dd className="mt-2 font-mono text-sm text-sky-300">{value ?? "—"}</dd></div>)}</dl><p className="mt-5 text-xs text-slate-500">{client.last_successful_response_at ? `Last successful response: ${new Date(client.last_successful_response_at).toLocaleString()}` : `Diagnostic: ${client.error_code ?? "No successful response"}`}</p></section>
+    </div></main>;
 }

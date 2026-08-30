@@ -5,7 +5,7 @@ from enum import Enum
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.domain.document import RawDocument
+from app.integrations.contracts import Evidence
 
 
 class SourceType(str, Enum):
@@ -138,14 +138,35 @@ class DataSource(BaseModel):
         return WebsiteDiscoveryConfig.model_validate(self.scraper_config_json or {})
 
 
+class SourceProcessingError(BaseModel):
+    """Describe an unexpected failure while processing one evidence item."""
+
+    evidence_id: str
+    message: str
+
+
+class SourceProcessingSummary(BaseModel):
+    """Aggregate terminal processing outcomes for newly collected evidence."""
+
+    attempted: int = 0
+    ready_for_review: int = 0
+    filtered_out: int = 0
+    needs_resolution: int = 0
+    mapping_failed: int = 0
+    failed: int = 0
+    deferred: int = 0
+    errors: list[SourceProcessingError] = Field(default_factory=list)
+
+
 class SourceCollectionResult(BaseModel):
     """Summarize one bounded website collection run."""
 
     source_id: str
-    documents: list[RawDocument]
+    evidence: list[Evidence]
     discovered_urls: int
     fetched_pages: int
     skipped_urls: int
-    created_documents: int
-    duplicate_documents: int
+    created_evidence: int
+    duplicate_evidence: int
     errors: list[str] = Field(default_factory=list)
+    processing: SourceProcessingSummary = Field(default_factory=SourceProcessingSummary)

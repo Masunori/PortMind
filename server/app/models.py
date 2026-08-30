@@ -1,4 +1,4 @@
-"""SQLAlchemy mappings for persisted supply-chain entities."""
+"""SQLAlchemy mappings for platform-owned persistence only."""
 
 from datetime import datetime
 
@@ -8,205 +8,30 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
 
-class EntitySchemaRecord(Base):
-    """Persist a named node or edge schema."""
-
-    __tablename__ = "entity_schemas"
-
-    id: Mapped[str] = mapped_column(String(100), primary_key=True)
-    name: Mapped[str] = mapped_column(String(200), nullable=False)
-    entity_kind: Mapped[str] = mapped_column(String(20), nullable=False)
-    current_version_id: Mapped[str | None] = mapped_column(String(120))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
-class SchemaVersionRecord(Base):
-    """Persist one immutable schema definition version."""
-
-    __tablename__ = "schema_versions"
-
-    id: Mapped[str] = mapped_column(String(120), primary_key=True)
-    schema_id: Mapped[str] = mapped_column(
-        ForeignKey("entity_schemas.id", ondelete="CASCADE"), nullable=False
-    )
-    version: Mapped[int] = mapped_column(Integer, nullable=False)
-    fields: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
-class SimulationRuleRecord(Base):
-    """Persist a validated declarative lifecycle rule."""
-
-    __tablename__ = "simulation_rules"
-
-    id: Mapped[str] = mapped_column(String(100), primary_key=True)
-    name: Mapped[str] = mapped_column(String(200), nullable=False)
-    trigger: Mapped[str] = mapped_column(String(40), nullable=False)
-    operation: Mapped[str] = mapped_column(String(20), nullable=False)
-    source: Mapped[str] = mapped_column(String(200), nullable=False)
-    target_metric: Mapped[str] = mapped_column(String(64), nullable=False)
-    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
-class NetworkContextStateRecord(Base):
-    """Persist a monotonically increasing AI-context version."""
-
-    __tablename__ = "network_context_state"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    version: Mapped[int] = mapped_column(Integer, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
-class NodeRecord(Base):
-    """Persist a supply-chain node in the ``nodes`` table."""
-
-    __tablename__ = "nodes"
-
-    id: Mapped[str] = mapped_column(String(100), primary_key=True)
-    name: Mapped[str] = mapped_column(String(200), nullable=False)
-    type: Mapped[str] = mapped_column(String(50), nullable=False)
-    inventory: Mapped[float] = mapped_column(Float, nullable=False)
-    capacity: Mapped[float] = mapped_column(Float, nullable=False)
-    schema_version_id: Mapped[str | None] = mapped_column(
-        ForeignKey("schema_versions.id", ondelete="RESTRICT")
-    )
-    attributes: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
-
-
-class EdgeRecord(Base):
-    """Persist a directed transport edge in the ``edges`` table."""
-
-    __tablename__ = "edges"
-
-    id: Mapped[str] = mapped_column(String(100), primary_key=True)
-    source_id: Mapped[str] = mapped_column(
-        ForeignKey("nodes.id"),
-        nullable=False,
-    )
-    target_id: Mapped[str] = mapped_column(
-        ForeignKey("nodes.id"),
-        nullable=False,
-    )
-    mode: Mapped[str] = mapped_column(String(50), nullable=False)
-    transit_time_hours: Mapped[float] = mapped_column(Float, nullable=False)
-    cost: Mapped[float] = mapped_column(Float, nullable=False)
-    capacity: Mapped[float] = mapped_column(Float, nullable=False)
-    schema_version_id: Mapped[str | None] = mapped_column(
-        ForeignKey("schema_versions.id", ondelete="RESTRICT")
-    )
-    attributes: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
-
-
-class ShipmentRecord(Base):
-    """Persist a routed shipment in the ``shipments`` table."""
-
-    __tablename__ = "shipments"
-
-    id: Mapped[str] = mapped_column(String(100), primary_key=True)
-    origin_id: Mapped[str] = mapped_column(
-        ForeignKey("nodes.id"),
-        nullable=False,
-    )
-    destination_id: Mapped[str] = mapped_column(
-        ForeignKey("nodes.id"),
-        nullable=False,
-    )
-    quantity: Mapped[float] = mapped_column(Float, nullable=False)
-    current_node_id: Mapped[str] = mapped_column(
-        ForeignKey("nodes.id"),
-        nullable=False,
-    )
-    route: Mapped[list[str]] = mapped_column(JSON, nullable=False)
-    expected_arrival: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-    )
-
-
-class DisruptionRecord(Base):
-    """Persist a time-bounded disruption in the ``disruptions`` table."""
-
-    __tablename__ = "disruptions"
-
-    id: Mapped[str] = mapped_column(String(100), primary_key=True)
-    type: Mapped[str] = mapped_column(String(50), nullable=False)
-    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    affected_node_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False)
-    affected_edge_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False)
-    start_time: Mapped[float] = mapped_column(Float, nullable=False)
-    end_time: Mapped[float] = mapped_column(Float, nullable=False)
-    effects: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
-
-
 class ScenarioRecord(Base):
-    """Persist a weighted scenario in the ``scenarios`` table."""
+    """Persist a platform-owned scenario definition."""
 
     __tablename__ = "scenarios"
-
     id: Mapped[str] = mapped_column(String(100), primary_key=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     probability: Mapped[float] = mapped_column(Float, nullable=False)
-    disruptions: Mapped[list[dict[str, object]]] = mapped_column(
-        JSON,
-        nullable=False,
-    )
+    disruptions: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False)
 
 
 class PlanRecord(Base):
-    """Persist a contingency plan with inline actions."""
+    """Persist a reviewable collection of client-agnostic actions."""
 
     __tablename__ = "plans"
-
     id: Mapped[str] = mapped_column(String(100), primary_key=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     actions: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False)
-    status: Mapped[str] = mapped_column(
-        String(30),
-        nullable=False,
-        default="GENERATED",
-    )
-
-
-class RunRecord(Base):
-    """Persist an observable orchestration run and its final output."""
-
-    __tablename__ = "runs"
-
-    id: Mapped[str] = mapped_column(String(100), primary_key=True)
-    signal: Mapped[str] = mapped_column(String(2000), nullable=False)
-    status: Mapped[str] = mapped_column(String(30), nullable=False)
-    scenarios: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False)
-    plans: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False)
-    results: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False)
-    recommendation: Mapped[dict[str, object] | None] = mapped_column(JSON)
-    error: Mapped[str | None] = mapped_column(String(2000))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
-class RunEventRecord(Base):
-    """Persist one ordered orchestration event for a run."""
-
-    __tablename__ = "run_events"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    run_id: Mapped[str] = mapped_column(
-        ForeignKey("runs.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
-    type: Mapped[str] = mapped_column(String(50), nullable=False)
-    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="GENERATED")
 
 
 class DataSourceRecord(Base):
-    """Persist a user-managed ingestion source."""
+    """Persist configuration and scheduling state for an ingestion source."""
 
     __tablename__ = "data_sources"
-
     id: Mapped[str] = mapped_column(String(100), primary_key=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     type: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -224,126 +49,206 @@ class DataSourceRecord(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class RawDocumentRecord(Base):
-    """Persist normalized content collected from a configured source."""
+class CollectionBatchRecord(Base):
+    """Persist a user-labeled grouping of related collection runs."""
 
-    __tablename__ = "raw_documents"
-
+    __tablename__ = "collection_batches"
     id: Mapped[str] = mapped_column(String(100), primary_key=True)
-    source_id: Mapped[str] = mapped_column(
-        ForeignKey("data_sources.id", ondelete="CASCADE"), nullable=False
-    )
-    title: Mapped[str] = mapped_column(String(500), nullable=False)
-    source_url: Mapped[str | None] = mapped_column(String(2000))
-    media_type: Mapped[str] = mapped_column(String(200), nullable=False)
-    content: Mapped[str] = mapped_column(Text, nullable=False)
-    content_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    status: Mapped[str] = mapped_column(String(30), nullable=False)
-    error: Mapped[str | None] = mapped_column(Text)
-    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class DocumentAssessmentRecord(Base):
-    """Persist provider relevance plus any explicit human override."""
+class CollectionRunRecord(Base):
+    """Persist execution state and outcome counts for one collection attempt."""
 
-    __tablename__ = "document_assessments"
+    __tablename__ = "collection_runs"
+    id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    batch_id: Mapped[str | None] = mapped_column(ForeignKey("collection_batches.id", ondelete="SET NULL"))
+    source_id: Mapped[str | None] = mapped_column(ForeignKey("data_sources.id", ondelete="SET NULL"))
+    status: Mapped[str] = mapped_column(String(30), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    accepted_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    duplicate_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failure_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
-    document_id: Mapped[str] = mapped_column(
-        ForeignKey("raw_documents.id", ondelete="CASCADE"), primary_key=True
-    )
+
+class EvidenceRecord(Base):
+    """Persist canonical evidence, provenance, and retention state."""
+
+    __tablename__ = "evidence"
+    id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    source_id: Mapped[str] = mapped_column(ForeignKey("data_sources.id", ondelete="RESTRICT"), nullable=False)
+    collection_run_id: Mapped[str | None] = mapped_column(ForeignKey("collection_runs.id", ondelete="SET NULL"))
+    kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    media_type: Mapped[str] = mapped_column(String(200), nullable=False)
+    content: Mapped[str | None] = mapped_column(Text)
+    structured_content: Mapped[object | None] = mapped_column(JSON)
+    content_reference: Mapped[str | None] = mapped_column(String(2000))
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    duplicate_of_id: Mapped[str | None] = mapped_column(ForeignKey("evidence.id", ondelete="RESTRICT"))
+    source_url: Mapped[str | None] = mapped_column(String(2000))
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    processing_status: Mapped[str] = mapped_column(String(30), nullable=False)
+    parser_warnings: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    quality_metadata: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
+    retention_class: Mapped[str] = mapped_column(String(30), nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    raw_removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    legal_hold: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class EvidenceAssessmentRecord(Base):
+    """Persist a versioned provider assessment and any human override."""
+
+    __tablename__ = "evidence_assessments"
+    id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    evidence_id: Mapped[str] = mapped_column(ForeignKey("evidence.id", ondelete="CASCADE"), nullable=False)
     decision: Mapped[str] = mapped_column(String(30), nullable=False)
     relevance_probability: Mapped[float] = mapped_column(Float, nullable=False)
+    reason_codes: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     rationale: Mapped[str] = mapped_column(Text, nullable=False)
-    matched_entities: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    entity_hints: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    provider_metadata: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    context_version: Mapped[str] = mapped_column(String(120), nullable=False)
     human_override: Mapped[str | None] = mapped_column(String(30))
-    assessed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
-class EntityAliasRecord(Base):
-    """Map normalized human aliases onto authoritative graph identifiers."""
-
-    __tablename__ = "entity_aliases"
-
-    alias: Mapped[str] = mapped_column(String(300), primary_key=True)
-    entity_type: Mapped[str] = mapped_column(String(30), nullable=False)
-    entity_id: Mapped[str] = mapped_column(String(100), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class IntelligenceEventRecord(Base):
-    """Group independently sourced documents describing the same event."""
+class SignalRecord(Base):
+    """Persist the mutable lifecycle pointer for a canonical signal."""
 
-    __tablename__ = "intelligence_events"
-
+    __tablename__ = "signals"
     id: Mapped[str] = mapped_column(String(100), primary_key=True)
-    disruption_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    affected_entity_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False)
-    start_time: Mapped[float] = mapped_column(Float, nullable=False)
-    end_time: Mapped[float] = mapped_column(Float, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
-class EventDocumentRecord(Base):
-    """Link one event to every independent supporting document."""
-
-    __tablename__ = "event_documents"
-
-    event_id: Mapped[str] = mapped_column(
-        ForeignKey("intelligence_events.id", ondelete="CASCADE"), primary_key=True
-    )
-    document_id: Mapped[str] = mapped_column(
-        ForeignKey("raw_documents.id", ondelete="CASCADE"), primary_key=True
-    )
-    linked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
-class DisruptionCandidateRecord(Base):
-    """Persist editable, validated extraction without mutating disruptions."""
-
-    __tablename__ = "disruption_candidates"
-
-    id: Mapped[str] = mapped_column(String(100), primary_key=True)
-    document_id: Mapped[str] = mapped_column(
-        ForeignKey("raw_documents.id", ondelete="CASCADE"), nullable=False
-    )
-    event_id: Mapped[str | None] = mapped_column(
-        ForeignKey("intelligence_events.id", ondelete="SET NULL")
-    )
-    disruption_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    affected_locations: Mapped[list[str]] = mapped_column(JSON, nullable=False)
-    affected_node_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False)
-    affected_edge_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False)
-    start_time: Mapped[float] = mapped_column(Float, nullable=False)
-    end_time: Mapped[float] = mapped_column(Float, nullable=False)
-    probability: Mapped[float] = mapped_column(Float, nullable=False)
-    severity: Mapped[float] = mapped_column(Float, nullable=False)
-    effects_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
-    summary: Mapped[str] = mapped_column(Text, nullable=False)
-    extraction_confidence: Mapped[float] = mapped_column(Float, nullable=False)
-    validation_status: Mapped[str] = mapped_column(String(30), nullable=False)
-    validation_errors: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    retry_of_signal_id: Mapped[str | None] = mapped_column(
+        ForeignKey("signals.id", ondelete="RESTRICT"), index=True)
+    current_version_id: Mapped[str | None] = mapped_column(String(120))
+    lifecycle_status: Mapped[str] = mapped_column(String(30), nullable=False)
     review_status: Mapped[str] = mapped_column(String(30), nullable=False)
-    confirmed_disruption_id: Mapped[str | None] = mapped_column(
-        ForeignKey("disruptions.id", ondelete="SET NULL")
-    )
-    run_id: Mapped[str | None] = mapped_column(ForeignKey("runs.id", ondelete="SET NULL"))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    retention_class: Mapped[str] = mapped_column(String(30), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class SignalVersionRecord(Base):
+    """Persist one immutable interpreted and grounded signal revision."""
+
+    __tablename__ = "signal_versions"
+    id: Mapped[str] = mapped_column(String(120), primary_key=True)
+    signal_id: Mapped[str] = mapped_column(ForeignKey("signals.id", ondelete="CASCADE"), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    classification: Mapped[str] = mapped_column(String(30), nullable=False)
+    signal_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    temporal_window: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    occurrence_probability: Mapped[float] = mapped_column(Float, nullable=False)
+    severity: Mapped[float] = mapped_column(Float, nullable=False)
+    extraction_confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    grounding_confidence: Mapped[float | None] = mapped_column(Float)
+    mapping_confidence: Mapped[float | None] = mapped_column(Float)
+    processing_state: Mapped[str] = mapped_column(String(30), nullable=False)
+    provider_metadata: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    context_version: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class SignalEvidenceRecord(Base):
+    """Associate immutable signal versions with their supporting evidence."""
+
+    __tablename__ = "signal_evidence"
+    signal_version_id: Mapped[str] = mapped_column(ForeignKey("signal_versions.id", ondelete="CASCADE"), primary_key=True)
+    evidence_id: Mapped[str] = mapped_column(ForeignKey("evidence.id", ondelete="RESTRICT"), primary_key=True)
+
+
+class SignalEntityRecord(Base):
+    """Persist the resolution outcome for one entity mention in a signal."""
+
+    __tablename__ = "signal_entities"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    signal_version_id: Mapped[str] = mapped_column(ForeignKey("signal_versions.id", ondelete="CASCADE"), nullable=False)
+    mention: Mapped[str] = mapped_column(String(300), nullable=False)
+    is_target: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    entity_id: Mapped[str | None] = mapped_column(String(100))
+    entity_type: Mapped[str | None] = mapped_column(String(50))
+    status: Mapped[str] = mapped_column(String(30), nullable=False)
+    method: Mapped[str] = mapped_column(String(100), nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    context_version: Mapped[str] = mapped_column(String(120), nullable=False)
+
+
+class SignalEffectRecord(Base):
+    """Persist proposed, validated, and normalized disruption mappings."""
+
+    __tablename__ = "signal_effects"
+    id: Mapped[str] = mapped_column(String(120), primary_key=True)
+    signal_version_id: Mapped[str] = mapped_column(ForeignKey("signal_versions.id", ondelete="CASCADE"), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(40), nullable=False)
+    errors: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    mapping_proposal: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    local_validation: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    client_validation: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    normalized_disruption: Mapped[dict[str, object] | None] = mapped_column(JSON)
+    catalog_version: Mapped[str] = mapped_column(String(120), nullable=False)
+    schema_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    context_version: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class SignalRelationshipRecord(Base):
+    """Persist a reviewed semantic link between two signal versions."""
+
+    __tablename__ = "signal_relationships"
+    id: Mapped[str] = mapped_column(String(120), primary_key=True)
+    source_signal_version_id: Mapped[str] = mapped_column(ForeignKey("signal_versions.id", ondelete="CASCADE"), nullable=False)
+    target_signal_version_id: Mapped[str] = mapped_column(ForeignKey("signal_versions.id", ondelete="CASCADE"), nullable=False)
+    relationship: Mapped[str] = mapped_column(String(40), nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    rationale: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ExperimentPackageRecord(Base):
+    """Persist an immutable, reproducible simulation submission package."""
+
+    __tablename__ = "experiment_packages"
+    id: Mapped[str] = mapped_column(String(120), primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    context_version: Mapped[str] = mapped_column(String(120), nullable=False)
+    state_version: Mapped[str] = mapped_column(String(120), nullable=False)
+    signal_version_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    disruptions: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False)
+    occurrence_probability: Mapped[float] = mapped_column(Float, nullable=False)
+    provenance: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    validation_summary: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
+    client_run_id: Mapped[str | None] = mapped_column(String(120))
+    status: Mapped[str] = mapped_column(String(30), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class SimulationResultCopyRecord(Base):
+    """Cache authoritative client results with their exact version stamps."""
+
+    __tablename__ = "simulation_result_copies"
+    run_id: Mapped[str] = mapped_column(String(120), primary_key=True)
+    experiment_id: Mapped[str] = mapped_column(ForeignKey("experiment_packages.id", ondelete="RESTRICT"), nullable=False)
+    context_version: Mapped[str] = mapped_column(String(120), nullable=False)
+    state_version: Mapped[str] = mapped_column(String(120), nullable=False)
+    result: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class PlanningCycleRecord(Base):
+    """Store a non-authoritative workflow snapshot and immutable client links."""
+
+    __tablename__ = "planning_cycles"
+    id: Mapped[str] = mapped_column(String(120), primary_key=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
-class CandidateVersionRecord(Base):
-    """Preserve every pre-edit candidate snapshot."""
-
-    __tablename__ = "candidate_versions"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    candidate_id: Mapped[str] = mapped_column(
-        ForeignKey("disruption_candidates.id", ondelete="CASCADE"), nullable=False
-    )
-    version: Mapped[int] = mapped_column(Integer, nullable=False)
-    snapshot: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
-    reason: Mapped[str] = mapped_column(String(100), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

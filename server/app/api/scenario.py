@@ -1,14 +1,12 @@
-"""HTTP endpoints for scenario persistence and simulation."""
+"""HTTP endpoints for platform-owned scenario persistence."""
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, status
 
-from app.domain.scenario import Scenario, ScenarioSimulationResult
+from app.domain.scenario import Scenario
 from app.services.scenario_service import (
     get_scenario,
     get_scenarios,
     save_scenario,
-    simulate_all_scenarios,
-    simulate_scenario,
 )
 
 router = APIRouter(prefix="/api/scenarios", tags=["scenarios"])
@@ -26,26 +24,3 @@ def scenarios() -> list[Scenario]:
     """Return all persisted scenarios."""
 
     return get_scenarios()
-
-
-@router.post("/simulate-all", response_model=list[ScenarioSimulationResult])
-def simulate_all() -> list[ScenarioSimulationResult]:
-    """Run every persisted scenario in one deterministic batch."""
-
-    try:
-        return simulate_all_scenarios()
-    except ValueError as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
-
-
-@router.post("/{scenario_id}/simulate", response_model=ScenarioSimulationResult)
-def run_scenario(scenario_id: str) -> ScenarioSimulationResult:
-    """Run one persisted scenario by identifier."""
-
-    scenario = get_scenario(scenario_id)
-    if scenario is None:
-        raise HTTPException(status_code=404, detail="Scenario not found")
-    try:
-        return simulate_scenario(scenario)
-    except ValueError as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error

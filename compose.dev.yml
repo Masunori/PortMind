@@ -24,6 +24,17 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://psa:psa@database:5432/psa
       CLIENT_ORIGIN: http://localhost:3000
+      CLIENT_GATEWAY_URL: ${CLIENT_GATEWAY_URL:?Set CLIENT_GATEWAY_URL to the demo client integration API}
+      CLIENT_GATEWAY_TOKEN: ${CLIENT_GATEWAY_TOKEN:-}
+      FILTER_PROVIDER: ${FILTER_PROVIDER:-stub}
+      INTERPRETER_PROVIDER: ${INTERPRETER_PROVIDER:-stub}
+      HYPOTHESIS_PROVIDER: ${HYPOTHESIS_PROVIDER:-stub}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-flash-lite-latest}
+      GEMINI_MAX_ATTEMPTS: ${GEMINI_MAX_ATTEMPTS:-3}
+      GEMINI_TIMEOUT_SECONDS: ${GEMINI_TIMEOUT_SECONDS:-30}
+      RISK_PROVIDER: ${RISK_PROVIDER:-stub}
+      PLANNER_PROVIDER: ${PLANNER_PROVIDER:-stub}
       ENABLE_SOURCE_SCHEDULER: "true"
     ports:
       - "8000:8000"

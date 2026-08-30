@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 import re
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.database import SessionLocal
 from app.domain.source import (
@@ -14,7 +14,7 @@ from app.domain.source import (
     SourceRunStatus,
     SourceType,
 )
-from app.models import DataSourceRecord
+from app.models import DataSourceRecord, EvidenceRecord
 
 
 def _to_domain(record: DataSourceRecord) -> DataSource:
@@ -137,6 +137,10 @@ def delete_source(source_id: str) -> bool:
         record = session.get(DataSourceRecord, source_id)
         if record is None:
             return False
+        evidence_count = session.scalar(select(func.count()).select_from(EvidenceRecord).where(
+            EvidenceRecord.source_id == source_id)) or 0
+        if evidence_count:
+            raise PermissionError("Sources with retained evidence cannot be deleted")
         session.delete(record)
     return True
 

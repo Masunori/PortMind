@@ -1,8 +1,12 @@
 """HTTP CRUD endpoints for ingestion sources."""
 
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 
-from app.domain.source import DataSource, DataSourceCreate, DataSourceUpdate
+from app.domain.source import DataSource, DataSourceCreate, DataSourceUpdate, SourceCollectionResult
+from app.integrations import get_client_gateway, get_provider_bundle
+from app.integrations.gateway import ClientGateway
+from app.integrations.providers import ProviderBundle
+from app.services.collection_service import collect_and_process_source
 from app.services.source_service import (
     create_source,
     delete_source,
@@ -52,6 +56,26 @@ def edit_source(source_id: str, values: DataSourceUpdate) -> DataSource:
 def remove_source(source_id: str) -> Response:
     """Delete a source or return HTTP 404."""
 
-    if not delete_source(source_id):
-        raise HTTPException(status_code=404, detail="Source not found")
+    try:
+        removed = delete_source(source_id)
+    except PermissionError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    if not removed: raise HTTPException(status_code=404, detail="Source not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/{source_id}/collect", response_model=SourceCollectionResult)
+async def collect_source(
+    source_id: str,
+    gateway: ClientGateway = Depends(get_client_gateway),
+    providers: ProviderBundle = Depends(get_provider_bundle),
+) -> SourceCollectionResult:
+    """Collect a configured website and process its newly created evidence."""
+
+    item = get_source(source_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Source not found")
+    try:
+        return await collect_and_process_source(item, gateway=gateway, providers=providers)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error

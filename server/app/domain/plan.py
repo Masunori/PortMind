@@ -1,21 +1,13 @@
-"""Contingency plan actions and deterministic comparison contracts."""
+"""Simulation-agnostic platform plan envelopes."""
 
 from enum import Enum
+from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
-
-
-class PlanActionType(str, Enum):
-    """Identify the supported deterministic contingency interventions."""
-
-    REROUTE_SHIPMENT = "REROUTE_SHIPMENT"
-    EXPEDITE_SHIPMENT = "EXPEDITE_SHIPMENT"
-    USE_ALTERNATIVE_INVENTORY = "USE_ALTERNATIVE_INVENTORY"
-    WAIT = "WAIT"
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class PlanStatus(str, Enum):
-    """Track the human-decision lifecycle of a contingency plan."""
+    """Represent the human decision lifecycle of a generated plan."""
 
     GENERATED = "GENERATED"
     RECOMMENDED = "RECOMMENDED"
@@ -24,53 +16,82 @@ class PlanStatus(str, Enum):
 
 
 class PlanAction(BaseModel):
-    """Describe one intervention applied before a simulation starts."""
+    """Describe one client-agnostic action against zero or more targets."""
 
-    type: PlanActionType
-    shipment_id: str | None = None
-    new_route: list[str] | None = None
-    alternative_inventory_node_id: str | None = None
-    transit_time_multiplier: float = Field(default=1, gt=0)
-    cost_multiplier: float = Field(default=1, ge=0)
-
-    @model_validator(mode="after")
-    def validate_action_fields(self) -> "PlanAction":
-        """Require the fields needed by each supported action type."""
-
-        if self.type is PlanActionType.WAIT:
-            return self
-        if self.shipment_id is None:
-            raise ValueError(f"{self.type.value} requires shipment_id")
-        if self.type is PlanActionType.REROUTE_SHIPMENT and not self.new_route:
-            raise ValueError("REROUTE_SHIPMENT requires new_route")
-        if self.type is PlanActionType.USE_ALTERNATIVE_INVENTORY:
-            if self.alternative_inventory_node_id is None:
-                raise ValueError(
-                    "USE_ALTERNATIVE_INVENTORY requires alternative_inventory_node_id"
-                )
-            if not self.new_route:
-                raise ValueError("USE_ALTERNATIVE_INVENTORY requires new_route")
-        return self
+    model_config = ConfigDict(extra="forbid")
+    type: str = Field(min_length=1, max_length=100)
+    target_ids: list[str] = Field(default_factory=list, max_length=100)
+    payload: dict[str, Any] = Field(default_factory=dict)
 
 
 class Plan(BaseModel):
-    """Represent a named collection of explicit contingency actions."""
+    """Group proposed actions into a reviewable platform-owned plan."""
 
+    model_config = ConfigDict(extra="forbid")
     id: str
     name: str
     actions: list[PlanAction]
     status: PlanStatus = PlanStatus.GENERATED
 
 
-class PlanScenarioResult(BaseModel):
-    """Summarize one plan and scenario combination against baseline."""
+class PlanningLifecycle(str, Enum):
+    """Keep provider, execution, evaluation, and decision states explicit."""
 
-    plan_id: str
-    plan_name: str
-    scenario_id: str
-    scenario_name: str
-    probability: float = Field(ge=0, le=1)
-    total_cost: float = Field(ge=0)
-    average_lead_time_hours: float = Field(ge=0)
-    delay_hours: float = Field(ge=0)
-    late_shipments: int = Field(ge=0)
+    PROPOSED = "PROPOSED"
+    VALIDATED = "VALIDATED"
+    SUBMITTED = "SUBMITTED"
+    RUNNING = "RUNNING"
+    EVALUATED = "EVALUATED"
+    FAILED = "FAILED"
+    RECOMMENDED = "RECOMMENDED"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+
+class FrozenScenario(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    proposal_id: str
+    name: str
+    context_version: str
+    state_version: str
+    disruptions: list[dict[str, Any]] = Field(min_length=1, max_length=20)
+    active_disruptions: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
+    occurrence_probability: float = Field(ge=0, le=1)
+    signal_version_ids: list[str] = Field(default_factory=list)
+    provenance: dict[str, Any]
+
+
+class PlanRecordView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    proposal_id: str
+    name: str
+    status: PlanningLifecycle
+    interventions: list[dict[str, Any]] = Field(min_length=1, max_length=20)
+    planner_metadata: dict[str, Any]
+    rationale: str
+    assumptions: list[str]
+    intervention_run_id: str | None = None
+    intervention_metrics: dict[str, Any] | None = None
+    rank: int | None = None
+    disqualification_reasons: list[str] = Field(default_factory=list)
+    ranking_explanation: str | None = None
+
+
+class PlanningCycle(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    scenario: FrozenScenario
+    generated_scenarios: list[FrozenScenario] = Field(default_factory=list, max_length=20)
+    selected_disruption_ids: list[str] = Field(default_factory=list, max_length=20)
+    planner_mode: str = Field(default="single", pattern=r"^(single|panel)$")
+    planning_objectives: list[str] = Field(default_factory=list, max_length=50)
+    hard_constraints: dict[str, Any] = Field(default_factory=dict)
+    status: PlanningLifecycle
+    baseline_run_id: str | None = None
+    baseline_metrics: dict[str, Any] | None = None
+    plans: list[PlanRecordView] = Field(default_factory=list)
+    ranking_policy_version: str = "lexicographic-v1"
+    error_code: str | None = None
+    error_message: str | None = None

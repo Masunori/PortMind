@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ElementTree
 from bs4 import BeautifulSoup
 import httpx
 
-from app.domain.document import DocumentCreate
+from app.integrations.contracts import EvidenceCreate, EvidenceKind
 from app.domain.source import (
     DataSource,
     DiscoveryMode,
@@ -18,7 +18,7 @@ from app.domain.source import (
     WebsiteDiscoveryConfig,
 )
 from app.ingestion.extractors import extract_html
-from app.services.document_service import store_document
+from app.services.evidence_service import store_evidence
 
 NAVIGATION_TERMS = {
     "article",
@@ -209,15 +209,15 @@ async def discover_and_scrape_source(
     if not config.enabled:
         from app.ingestion.scraper import scrape_source
 
-        document, created = await scrape_source(source, client)
+        evidence, duplicate = await scrape_source(source, client)
         return SourceCollectionResult(
             source_id=source.id,
-            documents=[document],
+            evidence=[evidence],
             discovered_urls=1,
             fetched_pages=1,
             skipped_urls=0,
-            created_documents=int(created),
-            duplicate_documents=int(not created),
+            created_evidence=int(not duplicate),
+            duplicate_evidence=int(duplicate),
         )
 
     owns_client = client is None
@@ -225,7 +225,7 @@ async def discover_and_scrape_source(
     queue: deque[QueueEntry] = deque()
     seen: set[str] = set()
     queued: set[str] = set()
-    documents = []
+    evidence_items = []
     created_count = 0
     duplicate_count = 0
     skipped = 0
@@ -320,18 +320,19 @@ async def discover_and_scrape_source(
                 entry.depth > 0 and _looks_like_article(response.text)
             )
             if article and content_relevant and content.strip():
-                document, created = store_document(
-                    DocumentCreate(
+                evidence, duplicate = store_evidence(
+                    EvidenceCreate(
                         source_id=source.id,
+                        kind=EvidenceKind.WEBSITE,
                         title=title,
                         source_url=str(response.url),
                         media_type=media_type or "text/html",
                         content=content,
                     )
                 )
-                documents.append(document)
-                created_count += int(created)
-                duplicate_count += int(not created)
+                evidence_items.append(evidence)
+                created_count += int(not duplicate)
+                duplicate_count += int(duplicate)
             if article or entry.depth >= config.max_depth:
                 continue
             links, feeds = _html_links(response.text, entry.url)
@@ -349,11 +350,11 @@ async def discover_and_scrape_source(
 
     return SourceCollectionResult(
         source_id=source.id,
-        documents=documents,
+        evidence=evidence_items,
         discovered_urls=len(seen) + len(queue),
         fetched_pages=fetched,
         skipped_urls=skipped,
-        created_documents=created_count,
-        duplicate_documents=duplicate_count,
+        created_evidence=created_count,
+        duplicate_evidence=duplicate_count,
         errors=errors,
     )

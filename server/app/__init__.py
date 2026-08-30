@@ -1,1 +1,1 @@
-"""PSA ESG backend application."""
+"""AEGIS backend application."""

@@ -2,16 +2,16 @@
 
 import httpx
 
-from app.domain.document import DocumentCreate, RawDocument
 from app.domain.source import DataSource, SourceType
 from app.ingestion.extractors import extract_html
-from app.services.document_service import store_document
+from app.integrations.contracts import Evidence, EvidenceCreate, EvidenceKind
+from app.services.evidence_service import store_evidence
 
 
 async def scrape_source(
     source: DataSource,
     client: httpx.AsyncClient | None = None,
-) -> tuple[RawDocument, bool]:
+) -> tuple[Evidence, bool]:
     """Fetch, extract, and deduplicate one configured website source."""
 
     if source.type is not SourceType.WEBSITE or source.url is None:
@@ -22,9 +22,10 @@ async def scrape_source(
         response = await active_client.get(source.url)
         response.raise_for_status()
         title, content = extract_html(response.text)
-        return store_document(
-            DocumentCreate(
+        return store_evidence(
+            EvidenceCreate(
                 source_id=source.id,
+                kind=EvidenceKind.WEBSITE,
                 title=title,
                 source_url=str(response.url),
                 media_type=response.headers.get("content-type", "text/html"),

@@ -1,16 +1,19 @@
-import type { Disruption, ExposureAnalysis } from "@/types/disruption";
-import type { Network, NetworkResponse, Shipment } from "@/types/network";
-import type { Scenario, ScenarioSimulationResult } from "@/types/scenario";
-import type {
-    Plan,
-    PlanRankingResult,
-    PlanScenarioResult,
-    RankingWeights,
-} from "@/types/plan";
-import type { SimulationResult } from "@/types/simulation";
-import type { DataSource, DocumentAssessment, RawDocument } from "@/types/source";
-import type { DisruptionCandidate } from "@/types/candidate";
-import type { EntitySchema, SimulationRule } from "@/types/extensibility";
+import type { DataSource } from "@/types/source";
+import type { Evidence } from "@/types/evidence";
+import type { Signal } from "@/types/signal";
+import type { PlanningCycle } from "@/types/planning";
+
+/** Health and version information for the authoritative client integration. */
+export interface ClientConnection {
+    status: "ok" | "degraded";
+    client_id: string | null;
+    context_version: string | null;
+    schema_version: string | null;
+    state_version: string | null;
+    capability_version: string | null;
+    last_successful_response_at: string | null;
+    error_code: string | null;
+}
 
 async function fetchApi<T>(path: string, init?: RequestInit): Promise<T> {
     const backendUrl = process.env.BACKEND_URL ?? "http://localhost:8000";
@@ -26,139 +29,29 @@ async function fetchApi<T>(path: string, init?: RequestInit): Promise<T> {
     return (await response.json()) as T;
 }
 
-export async function getSupplyChainData(): Promise<NetworkResponse> {
-    const [network, shipments, disruptions, scenarios, plans] = await Promise.all([
-        fetchApi<Network>("/api/network"),
-        fetchApi<Shipment[]>("/api/shipments"),
-        getDisruptions(),
-        getScenarios(),
-        getPlans(),
-    ]);
-    const exposures = await Promise.all(
-        disruptions
-            .filter((disruption) => disruption.enabled)
-            .map((disruption) => getDisruptionExposure(disruption.id)),
-    );
-
-    return { network, shipments, disruptions, exposures, scenarios, plans };
-}
-
-export async function getNetwork(): Promise<Network> {
-    return fetchApi<Network>("/api/network");
-}
-
-export async function requestBaselineSimulation(): Promise<SimulationResult> {
-    return fetchApi<SimulationResult>("/api/simulations", { method: "POST" });
-}
-
-export async function getDisruptions(): Promise<Disruption[]> {
-    return fetchApi<Disruption[]>("/api/disruptions");
-}
-
-export async function getScenarios(): Promise<Scenario[]> {
-    return fetchApi<Scenario[]>("/api/scenarios");
-}
-
-export async function requestAllScenarioSimulations(): Promise<
-    ScenarioSimulationResult[]
-> {
-    return fetchApi<ScenarioSimulationResult[]>("/api/scenarios/simulate-all", {
-        method: "POST",
-    });
-}
-
-export async function getPlans(): Promise<Plan[]> {
-    return fetchApi<Plan[]>("/api/plans");
-}
-
-export async function requestPlanComparison(): Promise<PlanScenarioResult[]> {
-    return fetchApi<PlanScenarioResult[]>("/api/plans/compare", {
-        method: "POST",
-    });
-}
-
-export async function requestPlanRanking(
-    weights: RankingWeights,
-): Promise<PlanRankingResult> {
-    return fetchApi<PlanRankingResult>("/api/plans/rank", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(weights),
-    });
-}
-
-export async function getDisruptionExposure(
-    disruptionId: string,
-): Promise<ExposureAnalysis> {
-    return fetchApi<ExposureAnalysis>(
-        `/api/disruptions/${disruptionId}/exposure`,
-    );
-}
-
-export async function injectPortCongestion(): Promise<Disruption> {
-    const disruption: Disruption = {
-        id: "hai-phong-port-congestion",
-        type: "PORT_CONGESTION",
-        enabled: true,
-        affected_node_ids: ["hai-phong-port"],
-        affected_edge_ids: [],
-        start_time: 0,
-        end_time: 48,
-        effects: {
-            handling_time_multiplier: 2,
-        },
-    };
-
-    return fetchApi<Disruption>("/api/disruptions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(disruption),
-    });
-}
-
-export async function setDisruptionEnabled(
-    disruptionId: string,
-    enabled: boolean,
-): Promise<Disruption> {
-    return fetchApi<Disruption>(`/api/disruptions/${disruptionId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled }),
-    });
+export async function getClientConnection(): Promise<ClientConnection> {
+    return fetchApi<ClientConnection>("/health/client");
 }
 
 export async function getSources(): Promise<DataSource[]> {
     return fetchApi<DataSource[]>("/api/sources");
 }
 
-export async function getDocuments(): Promise<RawDocument[]> {
-    return fetchApi<RawDocument[]>("/api/documents");
+export async function getEvidence(archived = false, limit = 50, offset = 0,
+                                  includeDuplicates = false): Promise<Evidence[]> {
+    return fetchApi<Evidence[]>(`/api/evidence?archived=${archived}&include_duplicates=${includeDuplicates}&limit=${limit}&offset=${offset}`);
 }
 
-export async function getCandidates(): Promise<DisruptionCandidate[]> {
-    return fetchApi<DisruptionCandidate[]>("/api/disruption-candidates");
+export async function getEvidenceItem(id: string): Promise<Evidence> {
+    return fetchApi<Evidence>(`/api/evidence/${encodeURIComponent(id)}`);
 }
 
-export async function getDocumentAssessment(
-    documentId: string,
-): Promise<DocumentAssessment> {
-    return fetchApi<DocumentAssessment>(
-        `/api/documents/${documentId}/assessment`,
-    );
+export async function getSignals(reviewStatus?: string, limit = 50, offset = 0): Promise<Signal[]> {
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    if (reviewStatus) params.set("review_status", reviewStatus);
+    return fetchApi<Signal[]>(`/api/signals?${params}`);
 }
 
-export async function getCandidateExposure(
-    candidateId: string,
-): Promise<ExposureAnalysis> {
-    return fetchApi<ExposureAnalysis>(
-        `/api/disruption-candidates/${candidateId}/exposure`,
-    );
-}
-
-export async function getSchemas(): Promise<EntitySchema[]> {
-    return fetchApi<EntitySchema[]>("/api/schemas");
-}
-
-export async function getSimulationRules(): Promise<SimulationRule[]> {
-    return fetchApi<SimulationRule[]>("/api/simulation-rules");
+export async function getPlanningCycles(): Promise<PlanningCycle[]> {
+    return fetchApi<PlanningCycle[]>("/api/planning/cycles");
 }

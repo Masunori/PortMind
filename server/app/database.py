@@ -12,7 +12,7 @@ DATABASE_URL = os.getenv(
 
 
 class Base(DeclarativeBase):
-    """Base class for all persisted supply-chain models."""
+    """Base class for platform-owned persistence models."""
 
     pass
 

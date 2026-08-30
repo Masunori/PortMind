@@ -1,15 +1,10 @@
-"""Persist, list, and deterministically simulate scenarios."""
+"""Persist and list platform-owned scenario definitions."""
 
 from sqlalchemy import select
 
 from app.database import SessionLocal
-from app.domain.disruption import Disruption
-from app.domain.network import Network
-from app.domain.scenario import Scenario, ScenarioSimulationResult
-from app.domain.shipment import Shipment
+from app.domain.scenario import Scenario
 from app.models import ScenarioRecord
-from app.services.network_service import get_network, get_shipments
-from app.simulation import simulate
 
 
 def _to_domain(record: ScenarioRecord) -> Scenario:
@@ -19,10 +14,7 @@ def _to_domain(record: ScenarioRecord) -> Scenario:
         id=record.id,
         name=record.name,
         probability=record.probability,
-        disruptions=[
-            Disruption.model_validate(disruption)
-            for disruption in record.disruptions
-        ],
+        disruptions=record.disruptions,
     )
 
 
@@ -61,44 +53,3 @@ def get_scenario(scenario_id: str) -> Scenario | None:
     with SessionLocal() as session:
         record = session.get(ScenarioRecord, scenario_id)
         return _to_domain(record) if record is not None else None
-
-
-def _simulate_scenario(
-    scenario: Scenario,
-    network: Network,
-    shipments: list[Shipment],
-) -> ScenarioSimulationResult:
-    """Simulate a scenario against a supplied immutable baseline dataset."""
-
-    baseline = simulate(network, shipments)
-    result = simulate(network, shipments, disruptions=scenario.disruptions)
-
-    return ScenarioSimulationResult(
-        scenario_id=scenario.id,
-        name=scenario.name,
-        probability=scenario.probability,
-        total_cost=result.total_cost,
-        average_lead_time_hours=result.average_lead_time_hours,
-        delay_hours=max(
-            0,
-            result.average_lead_time_hours - baseline.average_lead_time_hours,
-        ),
-        late_shipments=result.late_shipments,
-    )
-
-
-def simulate_scenario(scenario: Scenario) -> ScenarioSimulationResult:
-    """Simulate one scenario and calculate delay against baseline."""
-
-    return _simulate_scenario(scenario, get_network(), get_shipments())
-
-
-def simulate_all_scenarios() -> list[ScenarioSimulationResult]:
-    """Run every persisted scenario in stable identifier order."""
-
-    network = get_network()
-    shipments = get_shipments()
-    return [
-        _simulate_scenario(scenario, network, shipments)
-        for scenario in get_scenarios()
-    ]

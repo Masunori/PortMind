@@ -7,6 +7,8 @@ from fastapi import HTTPException
 from sqlalchemy.exc import SQLAlchemyError
 
 from app import main
+from app.integrations.errors import ClientAuthenticationError
+from tests.fakes import FakeClientGateway
 
 
 class WorkingConnection:
@@ -50,6 +52,25 @@ def test_application_health() -> None:
     """The process health endpoint reports success without dependencies."""
 
     assert asyncio.run(main.health()) == {"status": "ok"}
+
+
+def test_client_health_reports_versions_without_credentials() -> None:
+    result = asyncio.run(main.client_health(FakeClientGateway()))
+    assert result | {"last_successful_response_at": "checked"} == {
+        "status": "ok", "client_id": "fake-client",
+        "context_version": "context-v1", "schema_version": "schema-v1",
+        "state_version": "state-v1", "capability_version": "capability-v1",
+        "last_successful_response_at": "checked", "error_code": None,
+    }
+
+
+def test_client_health_sanitizes_gateway_failures() -> None:
+    gateway = FakeClientGateway()
+    gateway.fail("get_context", ClientAuthenticationError("secret upstream response"))
+    result = asyncio.run(main.client_health(gateway))
+    assert result["status"] == "degraded"
+    assert result["error_code"] == "CLIENT_AUTHENTICATION_ERROR"
+    assert "secret" not in str(result)
 
 
 def test_database_health_when_connection_succeeds(

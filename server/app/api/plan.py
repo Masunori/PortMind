@@ -2,15 +2,12 @@
 
 from fastapi import APIRouter, HTTPException, status
 
-from app.domain.plan import Plan, PlanScenarioResult, PlanStatus
-from app.domain.ranking import PlanRankingResult, RankingWeights
+from app.domain.plan import Plan, PlanStatus
 from app.services.plan_service import (
-    compare_plans_and_scenarios,
     get_plans,
     save_plan,
     set_plan_status,
 )
-from app.services.ranking_service import rank_plans
 
 router = APIRouter(prefix="/api/plans", tags=["plans"])
 
@@ -18,7 +15,9 @@ router = APIRouter(prefix="/api/plans", tags=["plans"])
 @router.post("", response_model=Plan, status_code=status.HTTP_201_CREATED)
 def create_plan(plan: Plan) -> Plan:
     """Persist a new plan or replace one with the same identifier."""
-
+    if plan.status != PlanStatus.GENERATED:
+        raise HTTPException(status_code=409,
+            detail="Provider-created plans cannot set recommendation or decision status")
     return save_plan(plan)
 
 
@@ -29,30 +28,15 @@ def plans() -> list[Plan]:
     return get_plans()
 
 
-@router.post("/compare", response_model=list[PlanScenarioResult])
-def compare() -> list[PlanScenarioResult]:
-    """Simulate every persisted plan and scenario combination."""
-
-    try:
-        return compare_plans_and_scenarios()
-    except ValueError as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
-
-
-@router.post("/rank", response_model=PlanRankingResult)
-def rank(weights: RankingWeights) -> PlanRankingResult:
-    """Rank every plan using configurable deterministic objective weights."""
-
-    try:
-        return rank_plans(weights)
-    except ValueError as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
 
 
 def _decide_plan(plan_id: str, status: PlanStatus) -> Plan:
     """Persist a human decision or return HTTP 404 for an unknown plan."""
 
-    plan = set_plan_status(plan_id, status)
+    try:
+        plan = set_plan_status(plan_id, status)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
     if plan is None:
         raise HTTPException(status_code=404, detail="Plan not found")
     return plan

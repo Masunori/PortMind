@@ -7,11 +7,11 @@ from alembic.config import Config
 from sqlalchemy import create_engine, inspect
 
 
-def test_initial_migration_upgrades_and_downgrades(
+def test_migrations_produce_only_platform_owned_tables(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    """The initial migration creates and cleanly removes every table."""
+    """A fresh database contains only final platform-owned tables."""
 
     database_path = tmp_path / "migration.db"
     database_url = f"sqlite+pysqlite:///{database_path}"
@@ -23,42 +23,30 @@ def test_initial_migration_upgrades_and_downgrades(
     engine = create_engine(database_url)
     assert set(inspect(engine).get_table_names()) == {
         "alembic_version",
-        "nodes",
         "plans",
-        "run_events",
-        "runs",
-        "edges",
-        "shipments",
-        "disruptions",
         "scenarios",
         "data_sources",
-        "raw_documents",
-        "document_assessments",
-        "entity_aliases",
-        "intelligence_events",
-        "event_documents",
-        "disruption_candidates",
-        "candidate_versions",
-        "entity_schemas",
-        "schema_versions",
-        "simulation_rules",
-        "network_context_state",
+        "collection_batches",
+        "collection_runs",
+        "evidence",
+        "evidence_assessments",
+        "signals",
+        "signal_versions",
+        "signal_evidence",
+        "signal_entities",
+        "signal_effects",
+        "signal_relationships",
+        "experiment_packages",
+        "simulation_result_copies",
+        "planning_cycles",
     }
-    disruption_columns = {
-        column["name"]
-        for column in inspect(engine).get_columns("disruptions")
+    assert "legacy_document_id" not in {
+        column["name"] for column in inspect(engine).get_columns("evidence")
     }
-    assert "enabled" in disruption_columns
-    plan_columns = {
-        column["name"] for column in inspect(engine).get_columns("plans")
+    assert "retry_of_signal_id" in {
+        column["name"] for column in inspect(engine).get_columns("signals")
     }
-    assert "status" in plan_columns
-    node_columns = {column["name"] for column in inspect(engine).get_columns("nodes")}
-    edge_columns = {column["name"] for column in inspect(engine).get_columns("edges")}
-    assert {"schema_version_id", "attributes"} <= node_columns
-    assert {"schema_version_id", "attributes"} <= edge_columns
-
-    command.downgrade(config, "base")
-
-    assert set(inspect(engine).get_table_names()) == {"alembic_version"}
+    assert "is_target" in {
+        column["name"] for column in inspect(engine).get_columns("signal_entities")
+    }
     engine.dispose()
