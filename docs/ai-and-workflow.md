@@ -1,12 +1,12 @@
 # AI and workflow
 
-Six purpose-specific protocols isolate probabilistic work: `FilterProvider`,
+Seven purpose-specific protocols isolate probabilistic work: `FilterProvider`,
 `InterpreterProvider`, `EffectMappingProvider`, `RelationshipProvider`, `RiskProvider`,
-and `PlannerProvider`. Development uses transparent deterministic stubs; provider
+`HypothesisProvider`, and `PlannerProvider`. Development uses transparent deterministic stubs; provider
 selection is centralized in the integration factory.
 
-`HypothesisProvider` is an additional review-only boundary. It turns a human planning
-prompt into strict hypothetical signal proposals using Gemini structured output or a
+`HypothesisProvider` is a review-only boundary. It turns a human planning
+prompt into strict hypothetical signal proposals using Bedrock Converse structured output or a
 deterministic stub. The server does not persist this output. The browser retains it in
 `localStorage`, and only user-confirmed proposals enter scenario validation.
 
@@ -22,38 +22,41 @@ it as untrusted reference data so extracted mentions are more likely to match
 client-supported entity forms. It may not return trusted client identifiers;
 authoritative grounding still occurs afterward through `ClientGateway.resolve_entity`.
 
-## Gemini ingestion providers
+## Bedrock providers
 
-The filtering and interpretation stages can independently use Gemini while the other
-providers remain deterministic:
+Filtering, interpretation, hypothesis generation, risk generation, and planning can
+independently use Bedrock while effect mapping and relationship inference remain deterministic:
 
 ```dotenv
-FILTER_PROVIDER=gemini
-INTERPRETER_PROVIDER=gemini
-GEMINI_API_KEY=replace-with-a-Google-AI-key
-GEMINI_MODEL=gemini-flash-lite-latest
-GEMINI_MAX_ATTEMPTS=3
-GEMINI_TIMEOUT_SECONDS=30
+FILTER_PROVIDER=bedrock
+INTERPRETER_PROVIDER=bedrock
+HYPOTHESIS_PROVIDER=bedrock
+RISK_PROVIDER=bedrock
+PLANNER_PROVIDER=bedrock
+BEDROCK_REGION=ap-southeast-1
+BEDROCK_MODEL_ID=global.amazon.nova-2-lite-v1:0
+BEDROCK_MAX_ATTEMPTS=3
+BEDROCK_TIMEOUT_SECONDS=60
+BEDROCK_MAX_TOKENS=4096
 ```
 
-`GeminiFilterProvider` and `GeminiInterpreterProvider` implement the same protocols as
-their stub counterparts. They use Gemini structured output with Pydantic-generated JSON
+The Bedrock providers implement the same protocols as their stub counterparts. They use
+Converse structured output with Pydantic-generated JSON
 Schemas. Each response is parsed and locally validated before it crosses the provider
 boundary. Invalid JSON, missing or extra fields, out-of-range probabilities, and invalid
-temporal windows cause a correction request. `GEMINI_MAX_ATTEMPTS` is the total number
-of attempts, including the initial call; after the limit, `GeminiSchemaError` is raised.
+temporal windows cause a correction request. `BEDROCK_MAX_ATTEMPTS` is the total number
+of schema attempts, including the initial call; after the limit, `BedrockSchemaError` is raised.
 
-Transport and API errors are not schema failures. Rate limits, timeouts, network
-failures, and HTTP `500`, `502`, `503`, and `504` responses are retried with bounded
-exponential backoff; a valid `Retry-After` delay takes precedence. Authentication and
-other non-transient `4xx` responses fail immediately. Terminal errors expose only a
-bounded provider message—never API keys, headers, prompts, or evidence content. HTTP
-timeouts are bounded by `GEMINI_TIMEOUT_SECONDS`.
+Transport and API errors are not schema failures. Botocore applies bounded standard
+retries to transient service and transport errors. Authentication, validation, and
+other non-transient errors fail immediately. Terminal errors expose only a bounded
+provider message—never credentials, request data, prompts, or evidence content. SDK
+connection and read timeouts are bounded by `BEDROCK_TIMEOUT_SECONDS`.
 
-`GeminiHypothesisProvider` follows the same structured-output, retry, timeout, and
-strict Pydantic validation path. Set `HYPOTHESIS_PROVIDER=gemini`; when omitted, Gemini
-is selected if `GEMINI_API_KEY` is available and the deterministic stub is otherwise
-used.
+`BedrockHypothesisProvider`, `BedrockRiskProvider`, and `BedrockPlannerProvider` follow
+the same structured-output and strict Pydantic validation path. When
+`HYPOTHESIS_PROVIDER` is omitted, Bedrock is selected if `BEDROCK_MODEL_ID` is configured;
+otherwise the deterministic stub is used.
 
 Before interpreting accepted evidence, AEGIS fetches both entity-resolution
 capabilities and the versioned disruption catalog. The interpreter must return an
@@ -72,12 +75,22 @@ and downstream context without applying the selected effect to unrelated entitie
 Each planning cycle freezes `planner_mode` as `single` or `panel`. Panel mode invokes
 three deterministic role-labelled planners—continuity, cost, and resilience—through a
 bounded coordinator implementing the existing `PlannerProvider` protocol. There is no
-free-form conversation, configurable prompt, skill assignment, resource budget, or
+free-form conversation, per-role prompt configuration, skill assignment, resource budget, or
 external model call in this panel iteration. Every draft still requires client
 validation and simulation before deterministic ranking and approval.
 
+## Operator prompt configuration
+
+Bedrock filter, interpreter, and planner adapters read their system prompts when the
+provider is constructed. Built-in safe defaults are used unless an operator stores an
+override through `/api/settings/prompts`. Overrides are platform configuration in the
+`agent_prompts` table; they do not change the strict response schemas or any
+deterministic or client-authoritative validation boundary. The deterministic stub
+providers do not use these prompts, and risk and hypothesis prompts are not currently
+editable through this API.
+
 The LLM never supplies provider metadata or supporting evidence IDs. The adapter records
-the configured model and Gemini response ID itself, and derives supporting evidence from
+the configured model and AWS request ID itself, and derives supporting evidence from
 the input evidence (or none for a hypothetical). Entity output remains textual mentions;
 authoritative IDs still come only from `ClientGateway` grounding.
 

@@ -63,3 +63,41 @@ a separate plan-generation action.
 Acceptance requires a single user simulation action to yield baseline results and plans
 when the client completes synchronously, or the same combined payload after automatic
 polling when it completes asynchronously.
+
+## Automatic evaluation iteration
+
+This iteration extends the merged flow from proposal generation to the final human
+decision boundary.
+
+1. **Advance the whole machine-owned workflow.** `POST .../{cycle_id}/advance` refreshes
+   the baseline, generates plans once, submits every validated plan, refreshes queued
+   intervention runs, and applies `lexicographic-v1` after all runs are terminal.
+2. **Poll one cycle operation.** The first-party UI polls `advance` while any baseline or
+   intervention work remains. It does not require per-plan simulation or ranking clicks.
+3. **Stop before approval.** A successful flow ends at `RECOMMENDED`. Approval and
+   rejection remain explicit human actions and still do not execute interventions.
+4. **Retain recovery endpoints.** Baseline, proposal, individual plan, and ranking
+   endpoints remain compatible for API diagnostics; individual refresh also advances
+   the remaining cycle so recovery cannot strand other candidates.
+
+Tests verify synchronous baseline-to-recommendation execution, submission of every plan,
+panel ranking, and the UI's polling/stopping rules.
+
+## Gemini planning-provider iteration
+
+1. **Add purpose-specific adapters.** `GeminiRiskProvider` and
+   `GeminiPlannerProvider` implement the existing strict provider protocols with Gemini
+   structured output.
+2. **Share configuration.** Risk, planner, filter, interpreter, and hypothesis adapters
+   use the same `GEMINI_API_KEY`, `GEMINI_MODEL`, retry count, and timeout settings.
+3. **Preserve deterministic trust boundaries.** Gemini may propose only advertised
+   types and supplied IDs. Existing schema admission, local payload validation, client
+   reconciliation/validation, authoritative simulation, and deterministic ranking remain
+   outside the model.
+   Client-owned payload objects cross Gemini's structured-output boundary as encoded JSON
+   strings, then are decoded and validated against the original strict contracts. The
+   adapter removes unsupported response-schema annotations and constraints without
+   weakening the subsequent local validation.
+4. **Keep offline stubs.** Explicit `stub` configuration remains available for repeatable
+   tests. Compose defaults risk and planning roles to Gemini so `.env.local` drives the
+   normal development and production-like flows.

@@ -6,14 +6,21 @@ client entity references and payloads; the platform does not interpret routes,
 shipments, inventory, or other integration-specific ontology.
 
 An experiment freezes context and state versions, signal versions, normalized
-disruptions, interventions, provenance, probability, and an idempotency key. Submission
+disruptions, provenance, probability, and an idempotency key. Submission
 uses `POST /api/experiments/{id}/submit`; the client owns queued/running/completed/failed
 lifecycle state and authoritative metrics. Failed or incomplete runs never create a
 result copy. Completed copies preserve the exact experiment versions and client run ID.
 
+Planning cycles use a separate persistence path. Baseline and intervention submissions
+are sent directly from the frozen planning scenario and plan proposal; they do not
+create experiment-package or simulation-result-copy rows. The `planning_cycles` payload
+retains their run IDs and unchanged result dictionaries as non-authoritative workflow
+copies.
+
 Numerical examples are properties of the external demo client, not platform
-calculations. Metric interpretation and ranking require integration-profile metadata;
-the core platform stores undecomposed authoritative result dictionaries.
+calculations. The core platform stores undecomposed authoritative result dictionaries;
+the planning workflow reads only the metric names used by its deterministic ranking
+policy and configured hard constraints.
 
 ## Risk and planning workflow
 
@@ -70,14 +77,15 @@ scenario identity uses canonical JSON and includes context/state versions and
 provenance. Empty provider responses are valid and produce no scenarios or plans.
 
 The planner is called only after baseline status is `COMPLETED` and its authoritative
-result has been copied. Intervention capability discovery and validation use separate
-client endpoints; absence of those capabilities is an explicit client error and never
+result has been retained in the planning-cycle snapshot. Intervention capability
+discovery and validation use separate client endpoints; absence of those capabilities
+is an explicit client error and never
 causes disruption formats to be reused. Every intervention run carries the baseline
 run ID and exactly the baseline's frozen disruptions, context version, and state
-version. Refresh calls are safe: completed copied metrics are returned without another
+version. Refresh calls are safe: completed retained metrics are returned without another
 result fetch.
 
-`lexicographic-v1` minimizes, in order, `late_shipments`, `average_delay`, and
+`lexicographic-v1` minimizes, in order, `late_shipments`, `average_delay_hours`, and
 `total_cost`; missing configured metrics sort as infinity. Hard-constraint violations
 sort after feasible plans, and proposal ID is the stable tie-breaker. Failed and
 incomplete runs stay in history but are excluded. Provider rationale and deterministic
@@ -90,16 +98,19 @@ workflow snapshot; it does not mutate proposals, simulation inputs, or results.
 
 ## Planning API and failure behavior
 
-Planning endpoints are under `/api/planning/cycles`: create/list/get a cycle, refresh
-the baseline, generate proposals, submit/refresh each intervention, rank, and approve
-or reject. These are refreshable operations and do not hold requests open while a
-client run is queued. `planning_cycles` stores platform-owned, non-authoritative
+Planning endpoints are under `/api/planning/cycles`: create/list/get a cycle, advance
+the automatic workflow, and approve or reject. Granular baseline, proposal,
+intervention, and ranking endpoints remain available for compatibility and recovery.
+These are refreshable operations and do not hold requests open while a client run is
+queued. `planning_cycles` stores platform-owned, non-authoritative
 workflow snapshots and exact run/version links.
 
 Provider timeouts, malformed output, and failures stop the current operation without
 fabricating proposals. Client errors remain sanitized by the gateway. A stale context
 or state stops the cycle; failed simulation errors may be retained only as sanitized
 codes/messages. Reusing canonical inputs produces the same idempotency key.
+Planning-provider API failures return sanitized `502` responses (`429` for quota
+exhaustion) instead of unhandled server errors.
 
 To add a real provider later, implement `RiskProvider`, `HypothesisProvider`, or
 `PlannerProvider` and add an explicit factory branch. Providers receive only typed
@@ -113,7 +124,7 @@ The browser uses strict TypeScript lifecycle, scenario, proposal, evaluation, an
 decision shapes in `client/types/planning.ts`. Pure presentation rules independently
 gate baseline refresh, planner generation, plan submission, ranking, and human
 decisions. The UI labels planner rationale as qualitative and renders numerical values
-only from baseline or intervention result copies. Unknown or non-numeric metrics are
+only from baseline or intervention results returned by the client. Unknown or non-numeric metrics are
 shown as unavailable rather than coerced into a comparison.
 
 ### User workflow
@@ -132,15 +143,16 @@ Generated scenario alternatives are ordered by descending provider likelihood wi
 proposal ID as a deterministic tie-breaker. Impact values remain authoritative client
 simulation results rather than provider predictions.
 
-Queued baselines and intervention runs are polled automatically, with explicit refresh
-controls retained as a fallback. Once the baseline completes, AEGIS persists its
-authoritative result, derives allowed target IDs from the frozen scenario, and supplies
-the result unchanged to the cycle's selected single planner or bounded deterministic stub
-panel. The same baseline response contains both results and client-validated plans; the
+Queued baselines and intervention runs are polled automatically through the cycle-level
+advance operation. Once the baseline completes, AEGIS persists a non-authoritative copy
+of its result in the cycle snapshot, derives allowed target IDs from the frozen
+scenario, and supplies the result unchanged to the cycle's selected single planner or
+bounded deterministic stub panel. The same baseline response contains both results and client-validated plans; the
 first-party UI has no separate plan-generation form or raw entity-ID input. Default or
 cycle-frozen objectives and constraints are used for this invocation. The explicit
 proposals endpoint remains only for API compatibility. Each returned alternative can be
-simulated independently.
+simulated automatically and independently. When every plan run is terminal, AEGIS
+applies deterministic ranking and stops at the recommendation for human approval.
 Objectives and maximum metric/resource constraints entered at cycle creation are
 frozen with the cycle, supplied to planners, and reused by deterministic ranking.
 Completed results appear in a comparison

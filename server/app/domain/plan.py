@@ -86,6 +86,7 @@ class PlanningCycle(BaseModel):
     generated_scenarios: list[FrozenScenario] = Field(default_factory=list, max_length=20)
     selected_disruption_ids: list[str] = Field(default_factory=list, max_length=20)
     planner_mode: str = Field(default="single", pattern=r"^(single|panel)$")
+    panel_agent_count: int = Field(default=3, ge=1, le=5)
     planning_objectives: list[str] = Field(default_factory=list, max_length=50)
     hard_constraints: dict[str, Any] = Field(default_factory=dict)
     status: PlanningLifecycle

@@ -5,7 +5,10 @@ import asyncio
 import pytest
 
 from app.domain.source import DataSourceCreate, SourceType
-from app.integrations.contracts import DisruptionCatalog, DisruptionContract, EntityCandidate, EvidenceCreate, EvidenceKind
+from app.integrations.contracts import (
+    DisruptionCatalog, DisruptionContract, EffectMappingRequest, EntityCandidate,
+    EvidenceCreate, EvidenceKind, TemporalWindow,
+)
 from app.integrations.schema_validation import schema_hash
 from app.integrations.providers import (
     ProviderBundle, StubEffectMappingProvider, StubFilterProvider,
@@ -34,6 +37,30 @@ def gateway() -> FakeClientGateway:
         entity_id="hph", display_name="Hai Phong", entity_type="port", confidence=1)])
 
 
+def test_stub_effect_mapping_populates_required_contract_parameters():
+    schema = {
+        "type": "object", "additionalProperties": False,
+        "required": ["target_ids", "effective_from", "effective_until", "parameters"],
+        "properties": {
+            "target_ids": {"type": "array", "items": {"type": "string"}, "maxItems": 100},
+            "effective_from": {"type": "string", "format": "date-time"},
+            "effective_until": {"type": ["string", "null"], "format": "date-time"},
+            "parameters": {"type": "object", "additionalProperties": False,
+                "required": ["delay_hours"], "properties": {
+                    "delay_hours": {"type": "number", "minimum": 0, "maximum": 168}}},
+        },
+    }
+    contract = DisruptionContract(type="NODE_HANDLING_DELAY", target_types=["PORT"],
+        payload_schema=schema, schema_hash=schema_hash(schema))
+
+    proposal = run(StubEffectMappingProvider().propose_mapping(EffectMappingRequest(
+        signal_version_id="signal-v1", signal_type=contract.type,
+        resolved_entity_ids=["PORT-VNHPH"], severity=0.4,
+        temporal_window=TemporalWindow(), contract=contract, context_version="context-v1")))
+
+    assert proposal.payload["parameters"]["delay_hours"] == pytest.approx(67.2)
+
+
 def test_accepted_evidence_becomes_grounded_client_normalized_reviewable_signal(test_session_factory):
     source = create_source(DataSourceCreate(name="Reports", type=SourceType.UPLOAD))
     evidence, _ = store_evidence(EvidenceCreate(source_id=source.id, kind=EvidenceKind.UPLOAD,
@@ -44,6 +71,9 @@ def test_accepted_evidence_becomes_grounded_client_normalized_reviewable_signal(
     assert signal.entities[0].entity_id == "hph"
     assert signal.processing_state == "READY_FOR_REVIEW"
     assert signal.mapping_outcome == "MAPPED"
+    assert signal.mapping_proposal["payload"]["parameters"]["capacity_multiplier"] == pytest.approx(0.3)
+    assert signal.local_validation == {"valid": True, "errors": []}
+    assert signal.catalog_version == "catalog-v1"
     assert signal.normalized_disruption["payload"]["target_ids"] == ["hph"]
     assert signal.normalized_disruption["payload"]["effective_from"] == signal.temporal_window.starts_at.isoformat()
     assert any(name == "get_entity_resolution_capabilities" for name, _ in client.calls)

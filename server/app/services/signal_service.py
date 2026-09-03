@@ -315,7 +315,12 @@ def get_signal_version(version_id: str) -> CanonicalSignal:
         context_version=version.context_version, lifecycle_status=signal.lifecycle_status,
         review_status=signal.review_status, processing_state=version.processing_state,
         mapping_outcome=effect.outcome if effect else None, mapping_errors=effect.errors if effect else [],
-        normalized_disruption=effect.normalized_disruption if effect else None)
+        mapping_proposal=effect.mapping_proposal if effect else None,
+        local_validation=effect.local_validation if effect else None,
+        client_validation=effect.client_validation if effect else None,
+        normalized_disruption=effect.normalized_disruption if effect else None,
+        catalog_version=effect.catalog_version if effect else None,
+        schema_hash=effect.schema_hash if effect else None)
 
 
 def list_signals(*, review_status: str | None = None, limit: int = 50,

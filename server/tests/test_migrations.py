@@ -39,6 +39,7 @@ def test_migrations_produce_only_platform_owned_tables(
         "experiment_packages",
         "simulation_result_copies",
         "planning_cycles",
+        "agent_prompts",
     }
     assert "legacy_document_id" not in {
         column["name"] for column in inspect(engine).get_columns("evidence")
@@ -48,5 +49,8 @@ def test_migrations_produce_only_platform_owned_tables(
     }
     assert "is_target" in {
         column["name"] for column in inspect(engine).get_columns("signal_entities")
+    }
+    assert "schedule_enabled" in {
+        column["name"] for column in inspect(engine).get_columns("data_sources")
     }
     engine.dispose()

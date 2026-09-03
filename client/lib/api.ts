@@ -1,7 +1,8 @@
-import type { DataSource } from "@/types/source";
+import type { DataSource, SchedulingStatus } from "@/types/source";
 import type { Evidence } from "@/types/evidence";
 import type { Signal } from "@/types/signal";
 import type { PlanningCycle } from "@/types/planning";
+import type { AgentPrompt } from "@/types/prompt";
 
 /** Health and version information for the authoritative client integration. */
 export interface ClientConnection {
@@ -37,6 +38,10 @@ export async function getSources(): Promise<DataSource[]> {
     return fetchApi<DataSource[]>("/api/sources");
 }
 
+export async function getSchedulingStatus(): Promise<SchedulingStatus> {
+    return fetchApi<SchedulingStatus>("/api/sources/scheduling/status");
+}
+
 export async function getEvidence(archived = false, limit = 50, offset = 0,
                                   includeDuplicates = false): Promise<Evidence[]> {
     return fetchApi<Evidence[]>(`/api/evidence?archived=${archived}&include_duplicates=${includeDuplicates}&limit=${limit}&offset=${offset}`);
@@ -54,4 +59,8 @@ export async function getSignals(reviewStatus?: string, limit = 50, offset = 0):
 
 export async function getPlanningCycles(): Promise<PlanningCycle[]> {
     return fetchApi<PlanningCycle[]>("/api/planning/cycles");
+}
+
+export async function getAgentPrompts(): Promise<AgentPrompt[]> {
+    return fetchApi<AgentPrompt[]>("/api/settings/prompts");
 }

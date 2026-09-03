@@ -5,6 +5,11 @@ import "./globals.css";
 export const metadata: Metadata = {
     title: "AEGIS Platform",
     description: "Evidence-driven risk simulation and contingency planning platform",
+    robots: {
+        index: false,
+        follow: false,
+        nocache: true,
+    },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

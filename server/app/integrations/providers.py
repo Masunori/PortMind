@@ -105,8 +105,9 @@ class StubEffectMappingProvider:
     """Map supported signal types to the strict demo disruption payload."""
 
     async def propose_mapping(self, request: EffectMappingRequest) -> EffectMappingProposal:
-        parameters = ({"capacity_multiplier": max(0, 1 - request.severity)}
-                      if request.contract.type == "PORT_CAPACITY_CHANGE" else {})
+        parameters_schema = request.contract.payload_schema.get("properties", {}).get(
+            "parameters", {"type": "object", "properties": {}, "required": []})
+        parameters = _stub_mapping_value(parameters_schema, request.severity)
         return EffectMappingProposal(disruption_type=request.contract.type, payload={
             "target_ids": request.resolved_entity_ids,
             "effective_from": (request.temporal_window.starts_at.isoformat()
@@ -116,6 +117,44 @@ class StubEffectMappingProvider:
             "parameters": parameters,
         }, mapping_confidence=0.9 if request.resolved_entity_ids else 0.2,
             metadata=_metadata("effect-mapping"))
+
+
+def _stub_mapping_value(schema: dict, severity: float, field_name: str | None = None):
+    """Build deterministic, schema-shaped required mapping values.
+
+    Numeric fields scale across their advertised range so the fixture remains both
+    valid and operationally meaningful for contracts such as delay hours.
+    """
+
+    if "const" in schema:
+        return schema["const"]
+    if schema.get("enum"):
+        return schema["enum"][0]
+    kind = schema.get("type")
+    if isinstance(kind, list):
+        kind = next((item for item in kind if item != "null"), "null")
+    if kind == "object":
+        return {
+            name: _stub_mapping_value(child, severity, name)
+            for name, child in schema.get("properties", {}).items()
+            if name in schema.get("required", [])
+        }
+    if kind == "array":
+        return [
+            _stub_mapping_value(schema.get("items", {}), severity)
+            for _ in range(schema.get("minItems", 0))
+        ]
+    if kind in {"number", "integer"}:
+        minimum = schema.get("minimum", 0)
+        maximum = schema.get("maximum")
+        scale = 1 - severity if field_name == "capacity_multiplier" else severity
+        value = minimum if maximum is None else minimum + scale * (maximum - minimum)
+        return int(round(value)) if kind == "integer" else value
+    if kind == "string":
+        return "stub"
+    if kind == "boolean":
+        return severity >= 0.5
+    return None
 
 
 class StubRelationshipProvider:
@@ -246,7 +285,14 @@ class StubPlannerPanelProvider:
         ("continuity", "Prioritize operational continuity and service recovery."),
         ("cost", "Prioritize resource efficiency and cost control."),
         ("resilience", "Prioritize robust mitigation under uncertainty."),
+        ("responsiveness", "Prioritize speed of implementation and near-term risk reduction."),
+        ("sustainability", "Prioritize durable and environmentally responsible mitigation."),
     )
+
+    def __init__(self, agent_count: int = 3) -> None:
+        if not 1 <= agent_count <= 5:
+            raise ValueError("Panel agent count must be between 1 and 5")
+        self._agent_count = agent_count
 
     async def propose_plans(self, request: PlannerRequest) -> PlannerResponse:
         _fixture_failure(request.fixture_marker)
@@ -261,7 +307,8 @@ class StubPlannerPanelProvider:
                                     (sorted(request.intervention_contracts, key=lambda item: item.type)[0],
                                      request.known_entity_ids))
         proposals = []
-        for index, (role, rationale) in enumerate(self.roles[:request.proposal_limit], 1):
+        limit = min(request.proposal_limit, self._agent_count)
+        for index, (role, rationale) in enumerate(self.roles[:limit], 1):
             role_metadata = ProviderMetadata(provider="stub-panel",
                 model=f"deterministic-{role}-planner", prompt_version="panel-v1", stub=True)
             proposals.append(PlanProposal(proposal_id=f"stub-panel-{role}",

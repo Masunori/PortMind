@@ -304,7 +304,8 @@ class PlanningService:
             generation_limit: int = 5,
             confirmed_hypotheses: list[HypothesisSignalProposal] | None = None,
             entity_scope: list[GenerationEntity] | None = None,
-            planner_mode: str = "single", planning_objectives: list[str] | None = None,
+            planner_mode: str = "single", panel_agent_count: int = 3,
+            planning_objectives: list[str] | None = None,
             hard_constraints: dict[str, Any] | None = None,
             fixture_marker: str | None = None) -> PlanningCycle:
         """Generate and persist a reviewable scenario set without running a simulation."""
@@ -326,9 +327,10 @@ class PlanningService:
         # The simulation contract admits at most 20 disruptions. Start with the first
         # deterministic page selected; every generated item remains available for review.
         selected = available_ids[:20]
-        draft_id = f"cycle-{_key({'generated': [item.model_dump(mode='json') for item in generated]})[:24]}"
+        draft_id = f"cycle-{_key({'generated': [item.model_dump(mode='json') for item in generated], 'planner_mode': planner_mode, 'panel_agent_count': panel_agent_count})[:24]}"
         cycle = PlanningCycle(id=draft_id, scenario=generated[0], generated_scenarios=generated,
             selected_disruption_ids=selected, planner_mode=planner_mode,
+            panel_agent_count=panel_agent_count,
             planning_objectives=planning_objectives or [],
             hard_constraints=hard_constraints or {},
             status=PlanningLifecycle.PROPOSED)
@@ -544,7 +546,7 @@ class PlanningService:
         return cycle.model_copy(update={"plans": plans})
 
     def rank(self, cycle: PlanningCycle, *, metrics: tuple[str, ...] =
-             ("late_shipments", "average_delay", "total_cost"),
+             ("late_shipments", "average_delay_hours", "total_cost"),
              hard_constraints: dict[str, float] | None = None) -> PlanningCycle:
         constraints = cycle.hard_constraints if hard_constraints is None else hard_constraints
         evaluated = []

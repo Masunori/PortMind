@@ -4,7 +4,8 @@
 
 This iteration adds prompt-driven hypothetical risk proposals, browser-local review,
 and a user-selectable deterministic planner panel. Notifications and configurable
-multi-agent definitions, prompts, skills, and budgets remain out of scope.
+multi-agent definitions, per-role panel prompts, skills, and budgets remain out of
+scope. The shared Gemini planner system prompt is operator-configurable separately.
 
 ## Trust boundaries
 

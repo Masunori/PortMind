@@ -1,6 +1,6 @@
 /** Pure planning presentation rules shared by the UI and unit tests. */
 
-export const metricOrder = ["late_shipments", "average_delay", "total_cost"];
+export const metricOrder = ["late_shipments", "average_delay_hours", "total_cost"];
 
 export function humanize(value) {
     return String(value).replaceAll("_", " ").toLowerCase().replace(/^./, (letter) => letter.toUpperCase());
@@ -22,6 +22,14 @@ export function baselineNeedsRefresh(cycle) {
     return cycle.baseline_run_id !== null
         && cycle.baseline_metrics === null
         && cycle.status !== "FAILED";
+}
+
+export function workflowNeedsAdvance(cycle) {
+    if (baselineNeedsRefresh(cycle)) return true;
+    if (cycle.baseline_metrics === null || ["FAILED", "RECOMMENDED", "APPROVED", "REJECTED"].includes(cycle.status))
+        return false;
+    return (cycle.plans.length === 0 && cycle.status !== "EVALUATED")
+        || cycle.plans.some((plan) => ["VALIDATED", "RUNNING"].includes(plan.status));
 }
 
 export function canSubmitPlan(plan) {

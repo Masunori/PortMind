@@ -346,7 +346,12 @@ class CanonicalSignal(ContractModel):
     processing_state: SignalProcessingState
     mapping_outcome: MappingOutcome | None = None
     mapping_errors: list[str] = Field(default_factory=list)
+    mapping_proposal: dict[str, Any] | None = None
+    local_validation: dict[str, Any] | None = None
+    client_validation: dict[str, Any] | None = None
     normalized_disruption: dict[str, Any] | None = None
+    catalog_version: str | None = None
+    schema_hash: str | None = None
 
 
 class EvidenceProcessingAttempt(ContractModel):

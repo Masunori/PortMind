@@ -31,6 +31,24 @@ def test_active_application_code_cannot_import_removed_operational_modules() -> 
     assert violations == []
 
 
+def test_model_adapters_share_neutral_behavior_without_cross_vendor_imports() -> None:
+    """Keep transport adapters independent while sharing prompts and output contracts."""
+
+    root = Path(__file__).parents[1] / "app" / "integrations"
+    imports_by_adapter: dict[str, set[str]] = {}
+    for adapter in ("bedrock", "gemini"):
+        tree = ast.parse((root / f"{adapter}.py").read_text())
+        imports_by_adapter[adapter] = {
+            node.module for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module
+        }
+
+    assert "app.integrations.model_provider" in imports_by_adapter["bedrock"]
+    assert "app.integrations.model_provider" in imports_by_adapter["gemini"]
+    assert "app.integrations.gemini" not in imports_by_adapter["bedrock"]
+    assert "app.integrations.bedrock" not in imports_by_adapter["gemini"]
+
+
 def test_removed_operational_and_legacy_routes_are_absent() -> None:
     paths = set(app.openapi()["paths"])
     removed = {"/api/network", "/api/shipments", "/api/schemas",
@@ -47,4 +65,5 @@ def test_orm_metadata_contains_only_platform_owned_tables() -> None:
         "evidence", "evidence_assessments", "signals", "signal_versions",
         "signal_evidence", "signal_entities", "signal_effects", "signal_relationships",
         "experiment_packages", "simulation_result_copies", "planning_cycles",
+        "agent_prompts",
     }

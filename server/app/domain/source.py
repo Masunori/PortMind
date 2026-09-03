@@ -68,6 +68,7 @@ class DataSourceCreate(BaseModel):
     description: str = ""
     url: str | None = None
     enabled: bool = True
+    schedule_enabled: bool = False
     scrape_interval_minutes: int | None = Field(default=None, ge=1)
     scraper_type: str | None = None
     scraper_config_json: dict[str, object] | None = None
@@ -97,6 +98,8 @@ class DataSourceCreate(BaseModel):
             )
         ):
             raise ValueError("Upload sources cannot contain scraper configuration")
+        elif self.schedule_enabled:
+            raise ValueError("Upload sources cannot enable scheduling")
         return self
 
 
@@ -107,6 +110,7 @@ class DataSourceUpdate(BaseModel):
     description: str | None = None
     url: str | None = None
     enabled: bool | None = None
+    schedule_enabled: bool | None = None
     scrape_interval_minutes: int | None = Field(default=None, ge=1)
     scraper_type: str | None = None
     scraper_config_json: dict[str, object] | None = None
@@ -121,6 +125,7 @@ class DataSource(BaseModel):
     description: str
     url: str | None
     enabled: bool
+    schedule_enabled: bool
     scrape_interval_minutes: int | None
     scraper_type: str | None
     scraper_config_json: dict[str, object] | None

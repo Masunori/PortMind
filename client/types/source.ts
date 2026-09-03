@@ -28,6 +28,12 @@ export interface WebsiteDiscoveryConfig {
     sitemap_url: string | null;
 }
 
+/** Runtime scheduling mode reported by the API. */
+export interface SchedulingStatus {
+    enabled: boolean;
+    mode: "local-process" | "manual-only";
+}
+
 /** Persisted user-managed ingestion source returned by the source API. */
 export interface DataSource {
     id: string;
@@ -36,6 +42,8 @@ export interface DataSource {
     description: string;
     url: string | null;
     enabled: boolean;
+    /** Whether this scraper participates when the global scheduler is enabled. */
+    schedule_enabled: boolean;
     /** Interval between scheduled website collections; absent for upload sources. */
     scrape_interval_minutes: number | null;
     /** Collector implementation selected for website sources. */

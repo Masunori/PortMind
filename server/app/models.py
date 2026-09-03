@@ -38,6 +38,7 @@ class DataSourceRecord(Base):
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     url: Mapped[str | None] = mapped_column(String(2000))
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    schedule_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     scrape_interval_minutes: Mapped[int | None] = mapped_column(Integer)
     scraper_type: Mapped[str | None] = mapped_column(String(50))
     scraper_config_json: Mapped[dict[str, object] | None] = mapped_column(JSON)
@@ -251,4 +252,13 @@ class PlanningCycleRecord(Base):
     status: Mapped[str] = mapped_column(String(30), nullable=False)
     payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AgentPromptRecord(Base):
+    """Store an operator override for one agent's default system prompt."""
+
+    __tablename__ = "agent_prompts"
+    agent: Mapped[str] = mapped_column(String(30), primary_key=True)
+    prompt: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

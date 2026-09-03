@@ -6,6 +6,7 @@ import {
     apiErrorMessage,
     baselineNeedsRefresh,
     canDecide, canEditScenario, canGeneratePlans, canRank, canRefreshPlan, canReject,
+    workflowNeedsAdvance,
     canSubmitBaseline, canSubmitPlan,
     formatMetric, humanize, metricDelta, orderedPlans, validPlanningHorizon,
 } from "../lib/planning-ui.mjs";
@@ -49,6 +50,17 @@ test("post-simulation planning has no manual generation or entity-ID form", () =
     assert.match(source, /All mitigation plans/);
 });
 
+test("cycle creation lets the user choose a single planner or planner panel", () => {
+    const source = readFileSync(new URL("../components/PlanningConsole.tsx", import.meta.url), "utf8");
+    assert.match(source, /name="planner_mode"/);
+    assert.match(source, /<option value="single">Single planner<\/option>/);
+    assert.match(source, /<option value="panel">Panel of planners<\/option>/);
+    assert.match(source, /planner_mode: String\(form\.get\("planner_mode"\)/);
+    assert.match(source, /name="panel_agent_count"/);
+    assert.match(source, /\[1, 2, 3, 4, 5\]/);
+    assert.match(source, /panel_agent_count: Number\(form\.get\("panel_agent_count"\)/);
+});
+
 test("ranking availability and ordering ignore incomplete rank values", () => {
     assert.equal(canRank(cycle("VALIDATED", { plans: [plan("RUNNING")] })), false);
     assert.equal(canRank(cycle("VALIDATED", { plans: [plan("EVALUATED")] })), true);
@@ -57,6 +69,14 @@ test("ranking availability and ordering ignore incomplete rank values", () => {
         plan("RECOMMENDED", { proposal_id: "a", rank: 1 }),
     ]);
     assert.deepEqual(ordered.map((item) => item.proposal_id), ["a", "b"]);
+});
+
+test("workflow advancement continues through planning and stops at recommendation", () => {
+    assert.equal(workflowNeedsAdvance(cycle("RUNNING", { baseline_run_id: "base-1" })), true);
+    assert.equal(workflowNeedsAdvance(cycle("VALIDATED", { baseline_metrics: { late_shipments: 2 }, plans: [] })), true);
+    assert.equal(workflowNeedsAdvance(cycle("VALIDATED", { baseline_metrics: {}, plans: [plan("VALIDATED")] })), true);
+    assert.equal(workflowNeedsAdvance(cycle("EVALUATED", { baseline_metrics: {}, plans: [] })), false);
+    assert.equal(workflowNeedsAdvance(cycle("RECOMMENDED", { baseline_metrics: {}, plans: [plan("RECOMMENDED")] })), false);
 });
 
 test("authoritative metric deltas require numeric values on both runs", () => {

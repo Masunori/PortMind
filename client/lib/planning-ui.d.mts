@@ -6,6 +6,7 @@ export function canGeneratePlans(cycle: PlanningCycle): boolean;
 export function canEditScenario(cycle: PlanningCycle): boolean;
 export function canSubmitBaseline(cycle: PlanningCycle): boolean;
 export function baselineNeedsRefresh(cycle: PlanningCycle): boolean;
+export function workflowNeedsAdvance(cycle: PlanningCycle): boolean;
 export function canSubmitPlan(plan: PlanEvaluation): boolean;
 export function canRefreshPlan(plan: PlanEvaluation): boolean;
 export function canRank(cycle: PlanningCycle): boolean;

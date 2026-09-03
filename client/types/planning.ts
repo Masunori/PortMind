@@ -2,6 +2,8 @@ export type PlanningLifecycle =
     | "PROPOSED" | "VALIDATED" | "SUBMITTED" | "RUNNING" | "EVALUATED"
     | "FAILED" | "RECOMMENDED" | "APPROVED" | "REJECTED";
 
+export type PlannerMode = "single" | "panel";
+
 export interface FrozenScenario {
     id: string;
     proposal_id: string;
@@ -36,7 +38,8 @@ export interface PlanningCycle {
     scenario: FrozenScenario;
     generated_scenarios: FrozenScenario[];
     selected_disruption_ids: string[];
-    planner_mode: "single" | "panel";
+    planner_mode: PlannerMode;
+    panel_agent_count: number;
     planning_objectives: string[];
     hard_constraints: Record<string, unknown>;
     status: PlanningLifecycle;
@@ -74,6 +77,8 @@ export interface CreateCycleInput {
     planning_starts_at: string;
     planning_ends_at: string;
     generation_limit: number;
+    planner_mode: PlannerMode;
+    panel_agent_count: number;
 }
 
 export interface GeneratePlansInput {

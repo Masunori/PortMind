@@ -7,6 +7,7 @@ from app.integrations import get_client_gateway, get_provider_bundle
 from app.integrations.gateway import ClientGateway
 from app.integrations.providers import ProviderBundle
 from app.services.collection_service import collect_and_process_source
+from app.scheduler import scheduling_enabled
 from app.services.source_service import (
     create_source,
     delete_source,
@@ -16,6 +17,17 @@ from app.services.source_service import (
 )
 
 router = APIRouter(prefix="/api/sources", tags=["sources"])
+
+
+@router.get("/scheduling/status")
+def scheduling_status() -> dict[str, bool | str]:
+    """Expose whether this process will run per-source schedules."""
+
+    enabled = scheduling_enabled()
+    return {
+        "enabled": enabled,
+        "mode": "local-process" if enabled else "manual-only",
+    }
 
 
 @router.get("", response_model=list[DataSource])

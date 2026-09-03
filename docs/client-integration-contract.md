@@ -6,7 +6,9 @@ browser-facing `/api/*` routes.
 
 The client owns operational entities and state, capability schemas, simulation
 execution, and authoritative results. AEGIS owns evidence, signals, reviews,
-experiments, and non-authoritative result copies.
+experiments, planning-cycle snapshots, and non-authoritative result copies. Dedicated
+`simulation_result_copies` rows belong to immutable experiments; planning-cycle result
+dictionaries are retained inside the cycle snapshot.
 
 ## Transport and errors
 
@@ -44,7 +46,7 @@ Payload schemas may use JSON Schema type arrays for nullable values, for example
 | --- | --- | --- | --- |
 | Required | `GET` | `/context` | Current identity and version stamps |
 | Contract only | `GET` | `/schema` | Versioned client model schema |
-| Contract only | `POST` | `/entities/search` | Search authoritative entities |
+| Planning | `POST` | `/entities/search` | Search authoritative entities for explicit planning scope and interventions |
 | Required | `GET` | `/entity-resolution/capabilities` | Guide interpreter entity extraction |
 | Required | `POST` | `/entities/resolve` | Ground mentions to authoritative IDs |
 | Contract only | `POST` | `/state/query` | Read bounded authoritative state |
@@ -433,15 +435,18 @@ For failure, return a sanitized `error` object with `code` and `message`.
   "status": "COMPLETED",
   "results": {
     "late_shipments": 4,
-    "average_delay": 1.5,
+    "average_delay_hours": 1.5,
     "total_cost": 125000
   }
 }
 ```
 
 The result object is client-defined and authoritative. AEGIS preserves it unchanged,
-apart from reading explicitly configured ranking metrics. If the run is incomplete,
-return a non-`COMPLETED` status; AEGIS will not store a result copy.
+apart from reading the metric names used by its deterministic ranking policy and hard
+constraints. If the run is incomplete,
+return a non-`COMPLETED` status. Completed immutable experiments may create a dedicated
+result-copy row; completed planning runs retain the dictionary in their planning-cycle
+snapshot.
 
 ## Compatibility rules
 

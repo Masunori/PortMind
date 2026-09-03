@@ -5,13 +5,20 @@ directly to canonical `evidence`. Content hashes deduplicate raw content while r
 provenance. Scheduled website collection is bounded by same-site, robots, depth, page,
 path, and keyword controls.
 
+Automatic collection is opt-in twice: `ENABLE_SOURCE_SCHEDULER=true` starts the local
+process scheduler, and each website scraper must independently enable its schedule.
+Both defaults are off. The Sources UI displays global and per-scraper state; manual
+collection remains available while automatic scheduling is off. Lambda deployments
+must not start this in-process scheduler and may later use the same per-source setting
+from an EventBridge dispatcher if scheduled collection is retained.
+
 Evidence assessment and signal interpretation preserve provider metadata separately
 from deterministic review state. Hypothetical signals cannot claim supporting
 evidence. Unresolved or ambiguous entities remain review-blocking, and accepted signals
 retain the client context and disruption catalog versions used for grounding.
 
 Filtering and interpretation are protocol-based. By default, deterministic stubs make
-local runs repeatable. When configured for Gemini, the filter classifies evidence into
+local runs repeatable. When configured for Bedrock, the filter classifies evidence into
 `ACCEPT`, `REVIEW`, `REJECT`, or `QUARANTINE`; only accepted evidence proceeds to the
 interpreter. The interpreter proposes classification, signal type, textual entity
 mentions, time window, probability, severity, and extraction confidence. Both adapters
@@ -49,7 +56,7 @@ Mapping is synchronous. Unexpected local mapping exceptions are persisted as ter
 does not imply that background work is continuing. Nullable JSON Schema type unions
 advertised by the client are supported during local payload validation.
 
-If Gemini remains rate-limited after those attempts, collection stops invoking the
+If Bedrock remains rate-limited after the SDK retry policy is exhausted, collection stops invoking the
 provider for that run and marks the current and remaining new evidence as deferred.
 The evidence remains stored. Use **Process / retry** on its Evidence card, or call
 `POST /api/evidence/{id}/process`, after provider capacity recovers; this does not

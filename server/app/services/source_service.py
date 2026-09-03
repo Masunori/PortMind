@@ -27,6 +27,7 @@ def _to_domain(record: DataSourceRecord) -> DataSource:
         description=record.description,
         url=record.url,
         enabled=record.enabled,
+        schedule_enabled=record.schedule_enabled,
         scrape_interval_minutes=record.scrape_interval_minutes,
         scraper_type=record.scraper_type,
         scraper_config_json=record.scraper_config_json,
@@ -52,7 +53,7 @@ def create_source(values: DataSourceCreate) -> DataSource:
     now = datetime.now(timezone.utc)
     next_run = (
         now + timedelta(minutes=values.scrape_interval_minutes)
-        if values.type is SourceType.WEBSITE and values.enabled
+        if values.type is SourceType.WEBSITE and values.enabled and values.schedule_enabled
         else None
     )
     record = DataSourceRecord(
@@ -62,6 +63,7 @@ def create_source(values: DataSourceCreate) -> DataSource:
         description=values.description,
         url=values.url,
         enabled=values.enabled,
+        schedule_enabled=values.schedule_enabled,
         scrape_interval_minutes=values.scrape_interval_minutes,
         scraper_type=values.scraper_type,
         scraper_config_json=values.scraper_config_json,
@@ -110,6 +112,7 @@ def update_source(source_id: str, values: DataSourceUpdate) -> DataSource | None
                 "description": record.description,
                 "url": record.url,
                 "enabled": record.enabled,
+                "schedule_enabled": record.schedule_enabled,
                 "scrape_interval_minutes": record.scrape_interval_minutes,
                 "scraper_type": record.scraper_type,
                 "scraper_config_json": record.scraper_config_json,
@@ -124,6 +127,7 @@ def update_source(source_id: str, values: DataSourceUpdate) -> DataSource | None
             now + timedelta(minutes=record.scrape_interval_minutes)
             if record.type == SourceType.WEBSITE.value
             and record.enabled
+            and record.schedule_enabled
             and record.scrape_interval_minutes is not None
             else None
         )
@@ -155,6 +159,7 @@ def get_due_sources(now: datetime | None = None) -> list[DataSource]:
             .where(
                 DataSourceRecord.type == SourceType.WEBSITE.value,
                 DataSourceRecord.enabled.is_(True),
+                DataSourceRecord.schedule_enabled.is_(True),
                 DataSourceRecord.next_run_at <= effective_now,
             )
             .order_by(DataSourceRecord.next_run_at, DataSourceRecord.id)
@@ -178,7 +183,8 @@ def record_source_run(source_id: str, error: str | None = None) -> DataSource:
         record.updated_at = now
         record.next_run_at = (
             now + timedelta(minutes=record.scrape_interval_minutes)
-            if record.enabled and record.scrape_interval_minutes is not None
+            if record.enabled and record.schedule_enabled
+            and record.scrape_interval_minutes is not None
             else None
         )
     return _to_domain(record)

@@ -8,17 +8,15 @@ import {
     baselineNeedsRefresh,
     canDecide,
     canEditScenario,
-    canRank,
-    canRefreshPlan,
     canReject,
     canSubmitBaseline,
-    canSubmitPlan,
     formatMetric,
     humanize,
     metricDelta,
     metricOrder,
     orderedPlans,
     validPlanningHorizon,
+    workflowNeedsAdvance,
 } from "@/lib/planning-ui.mjs";
 import {
     hypothesisStorageKey,
@@ -220,34 +218,6 @@ function PlanCard({
                     </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                    {canSubmitPlan(plan) && (
-                        <button
-                            disabled={locked}
-                            onClick={() =>
-                                void mutate(
-                                    `submit-${plan.id}`,
-                                    `/api/planning/cycles/${cycle.id}/plans/${plan.id}/submit`,
-                                )
-                            }
-                            className="rounded-lg bg-sky-700 px-3 py-2 text-xs font-semibold"
-                        >
-                            Simulate plan
-                        </button>
-                    )}
-                    {canRefreshPlan(plan) && (
-                        <button
-                            disabled={locked}
-                            onClick={() =>
-                                void mutate(
-                                    `refresh-${plan.id}`,
-                                    `/api/planning/cycles/${cycle.id}/plans/${plan.id}/refresh`,
-                                )
-                            }
-                            className="rounded-lg border border-sky-800 px-3 py-2 text-xs text-sky-300"
-                        >
-                            Refresh run
-                        </button>
-                    )}
                     {canDecide(plan) && (
                         <button
                             disabled={locked}
@@ -399,29 +369,18 @@ function CycleCard({ initialCycle }: { initialCycle: PlanningCycle }) {
     }
 
     const baselinePending = baselineNeedsRefresh(cycle);
-    const pendingPlanId = cycle.plans.find(canRefreshPlan)?.id ?? null;
+    const workflowPending = workflowNeedsAdvance(cycle);
 
     useEffect(() => {
-        if (!baselinePending || busy !== null) return;
+        if (!workflowPending || busy !== null) return;
         const timeout = window.setTimeout(() => {
             void mutate(
-                "baseline-auto-refresh",
-                `/api/planning/cycles/${cycle.id}/baseline/refresh`,
+                "workflow-auto-advance",
+                `/api/planning/cycles/${cycle.id}/advance`,
             );
         }, 1500);
         return () => window.clearTimeout(timeout);
-    }, [baselinePending, busy, cycle.id, mutate]);
-
-    useEffect(() => {
-        if (baselinePending || pendingPlanId === null || busy !== null) return;
-        const timeout = window.setTimeout(() => {
-            void mutate(
-                `auto-refresh-${pendingPlanId}`,
-                `/api/planning/cycles/${cycle.id}/plans/${pendingPlanId}/refresh`,
-            );
-        }, 1500);
-        return () => window.clearTimeout(timeout);
-    }, [baselinePending, busy, cycle.id, mutate, pendingPlanId]);
+    }, [workflowPending, busy, cycle.id, mutate]);
     const disruptions = [
         ...new Map(
             cycle.generated_scenarios.flatMap((scenario) =>
@@ -672,25 +631,14 @@ function CycleCard({ initialCycle }: { initialCycle: PlanningCycle }) {
                             </h3>
                             <p className="text-xs text-slate-500">
                                 {cycle.planner_mode === "panel"
-                                    ? "Stub planner panel"
+                                    ? `Panel of ${cycle.panel_agent_count} ${cycle.panel_agent_count === 1 ? "planner" : "planners"}`
                                     : "Single planner"}{" "}
                                 · {cycle.plans.length} proposal
                                 {cycle.plans.length === 1 ? "" : "s"}
                             </p>
                         </div>
-                        {canRank(cycle) && (
-                            <button
-                                disabled={busy !== null}
-                                onClick={() =>
-                                    void mutate(
-                                        "rank",
-                                        `/api/planning/cycles/${cycle.id}/rank`,
-                                    )
-                                }
-                                className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold"
-                            >
-                                Apply deterministic ranking
-                            </button>
+                        {workflowPending && (
+                            <span className="text-xs text-sky-300">Simulating and ranking automatically…</span>
                         )}
                     </div>
                     {orderedPlans(cycle.plans).map((plan) => (
@@ -720,6 +668,7 @@ export default function PlanningConsole({
 }) {
     const router = useRouter();
     const [creating, setCreating] = useState(false);
+    const [plannerMode, setPlannerMode] = useState<"single" | "panel">("single");
     const [generatingHypotheses, setGeneratingHypotheses] = useState(false);
     const [hypothesesLoaded, setHypothesesLoaded] = useState(false);
     const [hypotheses, setHypotheses] = useState<LocalHypothesis[]>([]);
@@ -864,6 +813,7 @@ export default function PlanningConsole({
                     planning_ends_at: planningEndsAt,
                     generation_limit: Number(form.get("generation_limit") ?? 5),
                     planner_mode: String(form.get("planner_mode") ?? "single"),
+                    panel_agent_count: Number(form.get("panel_agent_count") ?? 3),
                     confirmed_hypotheses: hypotheses
                         .filter((item) => item.confirmed)
                         .map((item) => ({
@@ -1043,22 +993,16 @@ export default function PlanningConsole({
                 )}
             </section>
             <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
-                <div className="flex flex-wrap items-end justify-between gap-4">
-                    <div>
-                        <h2 className="font-semibold">
-                            Generate risk scenarios
-                        </h2>
-                        <p className="mt-1 max-w-2xl text-sm text-slate-400">
-                            The risk agent groups compatible observed, forecast,
-                            and confirmed hypothetical disruptions. Generation
-                            creates a review draft and does not invoke
-                            simulation.
-                        </p>
-                    </div>
-                    <form
-                        onSubmit={create}
-                        className="flex flex-wrap items-end gap-2"
-                    >
+                <div>
+                    <h2 className="font-semibold">Generate risk scenarios</h2>
+                    <p className="mt-1 max-w-3xl text-sm text-slate-400">
+                        The risk agent groups compatible observed, forecast, and
+                        confirmed hypothetical disruptions. Generation creates
+                        a review draft and does not invoke simulation.
+                    </p>
+                </div>
+                <form onSubmit={create} className="mt-5 grid gap-4">
+                    <div className={`grid items-start gap-3 sm:grid-cols-2 ${plannerMode === "panel" ? "xl:grid-cols-[minmax(10rem,1fr)_minmax(10rem,1fr)_8rem_minmax(14rem,1.35fr)_minmax(10rem,0.8fr)]" : "xl:grid-cols-[minmax(10rem,1fr)_minmax(10rem,1fr)_8rem_minmax(14rem,1.35fr)]"}`}>
                         <label className="grid gap-1 text-xs text-slate-400">
                             Horizon start
                             <input
@@ -1066,7 +1010,7 @@ export default function PlanningConsole({
                                 name="planning_starts_at"
                                 type="date"
                                 defaultValue={defaultHorizon.start}
-                                className={inputClass}
+                                className={`${inputClass} w-full`}
                             />
                         </label>
                         <label className="grid gap-1 text-xs text-slate-400">
@@ -1076,7 +1020,7 @@ export default function PlanningConsole({
                                 name="planning_ends_at"
                                 type="date"
                                 defaultValue={defaultHorizon.end}
-                                className={inputClass}
+                                className={`${inputClass} w-full`}
                             />
                         </label>
                         <label className="grid gap-1 text-xs text-slate-400">
@@ -1087,26 +1031,52 @@ export default function PlanningConsole({
                                 min="1"
                                 max="20"
                                 defaultValue="5"
-                                className={`${inputClass} w-24`}
+                                className={`${inputClass} w-full`}
                             />
                         </label>
                         <label className="grid gap-1 text-xs text-slate-400">
                             Planner mode
                             <select
                                 name="planner_mode"
-                                defaultValue="single"
-                                className={inputClass}
+                                value={plannerMode}
+                                onChange={(event) => setPlannerMode(event.target.value as "single" | "panel")}
+                                aria-describedby="planner-mode-help"
+                                className={`${inputClass} w-full`}
                             >
                                 <option value="single">Single planner</option>
-                                <option value="panel">Stub panel</option>
+                                <option value="panel">Panel of planners</option>
                             </select>
+                            <span id="planner-mode-help" className="text-[11px] leading-4 text-slate-500">
+                                A panel returns separate continuity, cost, and resilience proposals.
+                            </span>
                         </label>
+                        {plannerMode === "panel" && (
+                            <label className="grid gap-1 text-xs text-slate-400">
+                                Panel agents
+                                <select
+                                    name="panel_agent_count"
+                                    defaultValue="3"
+                                    className={`${inputClass} w-full`}
+                                >
+                                    {[1, 2, 3, 4, 5].map((count) => (
+                                        <option key={count} value={count}>
+                                            {count} {count === 1 ? "agent" : "agents"}
+                                        </option>
+                                    ))}
+                                </select>
+                                <span className="text-[11px] leading-4 text-slate-500">
+                                    Uses panel prompts 1 through the selected count.
+                                </span>
+                            </label>
+                        )}
+                    </div>
+                    <div className="grid items-end gap-3 md:grid-cols-2 xl:grid-cols-[minmax(20rem,2fr)_repeat(3,minmax(9rem,1fr))]">
                         <label className="grid gap-1 text-xs text-slate-400">
                             Objectives
                             <input
                                 name="cycle_objectives"
                                 defaultValue="minimize late shipments, minimize average delay, minimize total cost"
-                                className={inputClass}
+                                className={`${inputClass} w-full`}
                             />
                         </label>
                         {metricOrder.map((name) => (
@@ -1120,10 +1090,12 @@ export default function PlanningConsole({
                                     type="number"
                                     min="0"
                                     step="any"
-                                    className={`${inputClass} w-28`}
+                                    className={`${inputClass} w-full`}
                                 />
                             </label>
                         ))}
+                    </div>
+                    <div>
                         <button
                             disabled={!connected || creating}
                             title={
@@ -1131,14 +1103,14 @@ export default function PlanningConsole({
                                     ? "Reconnect the authoritative client first"
                                     : undefined
                             }
-                            className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold disabled:opacity-40"
+                            className="rounded-lg bg-sky-600 px-5 py-2.5 text-sm font-semibold disabled:opacity-40"
                         >
                             {creating
                                 ? "Generating…"
                                 : `Generate scenarios (${hypotheses.filter((item) => item.confirmed).length} hypotheses)`}
                         </button>
-                    </form>
-                </div>
+                    </div>
+                </form>
             </section>
             {initialCycles.length === 0 ? (
                 <p className="rounded-xl border border-dashed border-slate-700 p-12 text-center text-slate-400">

@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Respon
 from app.integrations import get_client_gateway, get_provider_bundle
 from app.integrations.contracts import CanonicalSignal, DeletionImpact, DuplicateDeletionPreview, DuplicateDeletionResult, Evidence, EvidenceCreate, EvidenceKind, EvidenceProcessingEligibility, EvidenceStoreResult, EvidenceUpdate
 from app.integrations.gateway import ClientGateway
+from app.integrations.bedrock import BedrockAPIError
 from app.integrations.gemini import GeminiAPIError
 from app.integrations.providers import ProviderBundle
 from app.services.collection_service import process_stored_evidence
@@ -82,7 +83,7 @@ async def retry_processing(
     try:
         return await process_stored_evidence(
             evidence_id, gateway=gateway, providers=providers)
-    except GeminiAPIError as error:
+    except (BedrockAPIError, GeminiAPIError) as error:
         raise HTTPException(
             status_code=429 if error.status_code == 429 else 503,
             detail=str(error),

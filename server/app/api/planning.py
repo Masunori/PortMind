@@ -14,6 +14,8 @@ from app.integrations.contracts import (
     EntitySearchRequest,
 )
 from app.integrations.errors import ClientGatewayError
+from app.integrations.bedrock import BedrockAPIError
+from app.integrations.gemini import GeminiAPIError
 from app.integrations.gateway import ClientGateway
 from app.integrations.providers import HypothesisProvider
 from app.integrations.schema_validation import admit_schema, validate_payload
@@ -28,6 +30,7 @@ class CycleCreate(BaseModel):
     planning_ends_at: datetime | None = None
     generation_limit: int = Field(default=5, ge=1, le=20)
     planner_mode: Literal["single", "panel"] = "single"
+    panel_agent_count: int = Field(default=3, ge=1, le=5)
     confirmed_hypotheses: list[HypothesisSignalProposal] = Field(default_factory=list, max_length=10)
     objectives: list[str] = Field(default_factory=list, max_length=50)
     hard_constraints: dict[str, Any] = Field(default_factory=dict)
@@ -61,14 +64,19 @@ class ScenarioSelection(BaseModel):
     disruption_ids: list[str] = Field(min_length=1, max_length=20)
 
 
-def service(planner_mode: str = "single") -> PlanningService:
-    return PlanningService(get_risk_provider(), get_planner_provider(planner_mode))
+def service(planner_mode: str = "single", panel_agent_count: int = 3) -> PlanningService:
+    return PlanningService(get_risk_provider(), get_planner_provider(planner_mode, panel_agent_count))
 
 
 def required(cycle_id: str) -> PlanningCycle:
     cycle = get_cycle(cycle_id)
     if cycle is None: raise HTTPException(404, "Planning cycle not found")
     return cycle
+
+
+def provider_failure(error: BedrockAPIError | GeminiAPIError) -> HTTPException:
+    return HTTPException(status_code=429 if error.status_code == 429 else 502,
+        detail={"code": "MODEL_PROVIDER_ERROR", "message": str(error)})
 
 
 @router.get("", response_model=list[PlanningCycle])
@@ -107,6 +115,8 @@ async def generate_hypotheses(body: HypothesisGenerationBody,
             if any(scope[target].entity_type.casefold() not in valid_types for target in targets):
                 raise ValueError("Hypothesis references an incompatible entity type")
         return response
+    except (BedrockAPIError, GeminiAPIError) as error:
+        raise provider_failure(error) from error
     except ClientGatewayError as error:
         raise HTTPException(502, {"code": error.code, "message": str(error)}) from error
     except ValueError as error:
@@ -141,8 +151,11 @@ async def create_cycle(body: CycleCreate, gateway: ClientGateway = Depends(get_c
             generation_limit=body.generation_limit,
             confirmed_hypotheses=body.confirmed_hypotheses,
             entity_scope=body.entity_scope,
-            planner_mode=body.planner_mode, planning_objectives=body.objectives,
+            planner_mode=body.planner_mode, panel_agent_count=body.panel_agent_count,
+            planning_objectives=body.objectives,
             hard_constraints=body.hard_constraints))
+    except (BedrockAPIError, GeminiAPIError) as error:
+        raise provider_failure(error) from error
     except ClientGatewayError as error:
         raise HTTPException(502, {"code": error.code, "message": str(error)}) from error
     except ValueError as error:
@@ -153,16 +166,21 @@ async def create_cycle(body: CycleCreate, gateway: ClientGateway = Depends(get_c
 def select_scenario(cycle_id: str, body: ScenarioSelection) -> PlanningCycle:
     try:
         current = required(cycle_id)
-        return save_cycle(service(current.planner_mode).compose_scenario(current, body.disruption_ids))
+        return save_cycle(service(current.planner_mode, current.panel_agent_count).compose_scenario(current, body.disruption_ids))
     except ValueError as error:
         raise HTTPException(422, str(error)) from error
 
 
-async def _propose_after_result(cycle: PlanningCycle, *, planner: PlanningService,
-                                gateway: ClientGateway) -> PlanningCycle:
-    if cycle.baseline_metrics is not None and not cycle.plans:
+async def _advance_to_approval(cycle: PlanningCycle, *, planner: PlanningService,
+                               gateway: ClientGateway) -> PlanningCycle:
+    """Advance every non-human step once, stopping only for polling or approval."""
+    if cycle.baseline_metrics is None and cycle.baseline_run_id is not None:
+        cycle = await planner.refresh_baseline(cycle, gateway=gateway)
+    if cycle.status == PlanningLifecycle.FAILED or cycle.baseline_metrics is None:
+        return cycle
+    if not cycle.plans:
         try:
-            return await planner.propose_plans(cycle, gateway=gateway,
+            cycle = await planner.propose_plans(cycle, gateway=gateway,
                 objectives=cycle.planning_objectives or ["minimize late shipments",
                     "minimize average delay", "minimize total cost"],
                 hard_constraints=cycle.hard_constraints)
@@ -172,17 +190,37 @@ async def _propose_after_result(cycle: PlanningCycle, *, planner: PlanningServic
             # an explicit proposal request will still surface the integration error.
             return cycle.model_copy(update={"error_code": error.code,
                 "error_message": f"Plan generation unavailable: {error}"})
+        if not cycle.plans:
+            return cycle.model_copy(update={"status": PlanningLifecycle.EVALUATED})
+    for plan in list(cycle.plans):
+        current = next(item for item in cycle.plans if item.id == plan.id)
+        if current.status == PlanningLifecycle.VALIDATED and current.intervention_run_id is None:
+            cycle = await planner.submit_plan(cycle, current.id, gateway=gateway)
+        elif current.status == PlanningLifecycle.RUNNING:
+            cycle = await planner.refresh_plan(cycle, current.id, gateway=gateway)
+    terminal = {PlanningLifecycle.EVALUATED, PlanningLifecycle.FAILED,
+                PlanningLifecycle.RECOMMENDED}
+    if (cycle.plans and all(item.status in terminal for item in cycle.plans)
+            and any(item.status == PlanningLifecycle.EVALUATED for item in cycle.plans)
+            and not any(item.status == PlanningLifecycle.RECOMMENDED for item in cycle.plans)):
+        cycle = planner.rank(cycle)
     return cycle
+
+
+# Kept as an internal compatibility alias for callers from the previous iteration.
+_propose_after_result = _advance_to_approval
 
 
 @router.post("/{cycle_id}/baseline/submit", response_model=PlanningCycle)
 async def submit_baseline(cycle_id: str,
                           gateway: ClientGateway = Depends(get_client_gateway)) -> PlanningCycle:
     current = required(cycle_id)
-    planner = service(current.planner_mode)
+    planner = service(current.planner_mode, current.panel_agent_count)
     try:
         cycle = await planner.submit_baseline(current, gateway=gateway)
-        return save_cycle(await _propose_after_result(cycle, planner=planner, gateway=gateway))
+        return save_cycle(await _advance_to_approval(cycle, planner=planner, gateway=gateway))
+    except (BedrockAPIError, GeminiAPIError) as error:
+        raise provider_failure(error) from error
     except ClientGatewayError as error:
         raise HTTPException(502, {"code": error.code, "message": str(error)}) from error
     except ValueError as error:
@@ -192,10 +230,11 @@ async def submit_baseline(cycle_id: str,
 @router.post("/{cycle_id}/baseline/refresh", response_model=PlanningCycle)
 async def refresh_baseline(cycle_id: str, gateway: ClientGateway = Depends(get_client_gateway)) -> PlanningCycle:
     current = required(cycle_id)
-    planner = service(current.planner_mode)
+    planner = service(current.planner_mode, current.panel_agent_count)
     try:
-        cycle = await planner.refresh_baseline(current, gateway=gateway)
-        return save_cycle(await _propose_after_result(cycle, planner=planner, gateway=gateway))
+        return save_cycle(await _advance_to_approval(current, planner=planner, gateway=gateway))
+    except (BedrockAPIError, GeminiAPIError) as error:
+        raise provider_failure(error) from error
     except ClientGatewayError as error:
         raise HTTPException(502, {"code": error.code, "message": str(error)}) from error
 
@@ -205,9 +244,11 @@ async def proposals(cycle_id: str, body: PlanGeneration,
                     gateway: ClientGateway = Depends(get_client_gateway)) -> PlanningCycle:
     current = required(cycle_id)
     try:
-        return save_cycle(await service(current.planner_mode).propose_plans(current, gateway=gateway,
+        return save_cycle(await service(current.planner_mode, current.panel_agent_count).propose_plans(current, gateway=gateway,
             known_entity_ids=body.known_entity_ids or None, objectives=body.objectives,
             hard_constraints=body.hard_constraints, proposal_limit=body.proposal_limit))
+    except (BedrockAPIError, GeminiAPIError) as error:
+        raise provider_failure(error) from error
     except ClientGatewayError as error:
         raise HTTPException(502, {"code": error.code, "message": str(error)}) from error
 
@@ -217,7 +258,7 @@ async def submit_plan(cycle_id: str, plan_id: str,
                       gateway: ClientGateway = Depends(get_client_gateway)) -> PlanningCycle:
     current = required(cycle_id)
     try:
-        return save_cycle(await service(current.planner_mode).submit_plan(current, plan_id, gateway=gateway))
+        return save_cycle(await service(current.planner_mode, current.panel_agent_count).submit_plan(current, plan_id, gateway=gateway))
     except ClientGatewayError as error:
         raise HTTPException(502, {"code": error.code, "message": str(error)}) from error
 
@@ -227,20 +268,40 @@ async def refresh_plan(cycle_id: str, plan_id: str,
                        gateway: ClientGateway = Depends(get_client_gateway)) -> PlanningCycle:
     current = required(cycle_id)
     try:
-        return save_cycle(await service(current.planner_mode).refresh_plan(current, plan_id, gateway=gateway))
+        planner = service(current.planner_mode, current.panel_agent_count)
+        cycle = await planner.refresh_plan(current, plan_id, gateway=gateway)
+        return save_cycle(await _advance_to_approval(cycle, planner=planner, gateway=gateway))
+    except (BedrockAPIError, GeminiAPIError) as error:
+        raise provider_failure(error) from error
     except ClientGatewayError as error:
         raise HTTPException(502, {"code": error.code, "message": str(error)}) from error
+
+
+@router.post("/{cycle_id}/advance", response_model=PlanningCycle)
+async def advance(cycle_id: str,
+                  gateway: ClientGateway = Depends(get_client_gateway)) -> PlanningCycle:
+    """Poll and execute all machine-owned workflow steps up to human approval."""
+    current = required(cycle_id)
+    planner = service(current.planner_mode, current.panel_agent_count)
+    try:
+        return save_cycle(await _advance_to_approval(current, planner=planner, gateway=gateway))
+    except (BedrockAPIError, GeminiAPIError) as error:
+        raise provider_failure(error) from error
+    except ClientGatewayError as error:
+        raise HTTPException(502, {"code": error.code, "message": str(error)}) from error
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
 
 
 @router.post("/{cycle_id}/rank", response_model=PlanningCycle)
 def rank(cycle_id: str) -> PlanningCycle:
     current = required(cycle_id)
-    return save_cycle(service(current.planner_mode).rank(current))
+    return save_cycle(service(current.planner_mode, current.panel_agent_count).rank(current))
 
 
 def decide(cycle_id: str, plan_id: str, decision: PlanningLifecycle) -> PlanningCycle:
     current = required(cycle_id)
-    return save_cycle(service(current.planner_mode).decide(current, plan_id, decision))
+    return save_cycle(service(current.planner_mode, current.panel_agent_count).decide(current, plan_id, decision))
 
 
 @router.post("/{cycle_id}/plans/{plan_id}/approve", response_model=PlanningCycle)

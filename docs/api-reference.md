@@ -6,6 +6,7 @@
 | `GET` | `/health/db` | Platform PostgreSQL health |
 | `GET` | `/health/client` | Sanitized client identity and versions |
 | `GET/POST` | `/api/sources` | Platform source management |
+| `GET` | `/api/sources/scheduling/status` | Global automatic-collection status |
 | `POST` | `/api/sources/{id}/collect` | Collect website evidence |
 | `GET/POST` | `/api/evidence` | Evidence inbox and JSON ingestion |
 | `POST` | `/api/evidence/upload` | Multipart upload directly to evidence |
@@ -26,6 +27,9 @@
 | `POST` | `/api/experiments` | Freeze an immutable experiment |
 | `POST` | `/api/experiments/{id}/submit` | Submit to the client |
 | `GET` | `/api/experiments/{id}/results` | Poll and copy authoritative results |
+| `GET` | `/api/settings/prompts` | List effective filter, interpreter, and planner prompts |
+| `PUT` | `/api/settings/prompts/{agent}` | Store an operator prompt override |
+| `DELETE` | `/api/settings/prompts/{agent}` | Restore the built-in prompt |
 
 Operational model, document/candidate, local disruption, local simulation, ranking,
 and legacy run endpoints have been removed.
@@ -51,18 +55,27 @@ and legacy run endpoints have been removed.
   from the frozen scenario, passes the results unchanged to the selected planner, validates
   its interventions through the client, and returns the results and plans together.
 - `POST /api/planning/cycles/{cycle_id}/baseline/refresh` refreshes a queued run and
-  invokes the planner exactly once when authoritative results become available. The UI
-  polls this operation automatically and exposes no intermediate plan-generation form.
+  invokes the planner exactly once when authoritative results become available.
+- `POST /api/planning/cycles/{cycle_id}/advance` is the first-party polling operation. It
+  progresses baseline refresh, plan generation, every intervention simulation, and
+  deterministic ranking, then stops at `RECOMMENDED` for human approval or rejection.
 - `POST /api/planning/cycles/{cycle_id}/proposals` remains a compatibility endpoint for
   API callers that intentionally regenerate proposals with an explicit bounded scope;
   the first-party UI does not use it.
-- `POST .../plans/{plan_id}/submit` and `/refresh` manage intervention runs.
-- `POST /api/planning/cycles/{cycle_id}/rank` applies `lexicographic-v1`.
+- `POST .../plans/{plan_id}/submit` and `/refresh` manage intervention runs for
+  compatibility and recovery; the UI does not require them.
+- `POST /api/planning/cycles/{cycle_id}/rank` applies `lexicographic-v1` for compatibility;
+  normal cycle advancement ranks automatically.
 - `POST .../plans/{plan_id}/reject` can reject a validated or evaluated proposal;
   `/approve` remains restricted to the deterministically ranked recommendation.
 
 Provider-created numerical metrics and direct lifecycle promotion are not accepted by
 any planning request schema.
+
+Planning baseline and intervention runs are not experiment-package submissions. Their
+run IDs and returned result dictionaries are retained in the `planning_cycles`
+snapshot; `/api/experiments/{id}/results` and `simulation_result_copies` apply only to
+the immutable reviewed-signal experiment workflow.
 
 The connected client integration additionally exposes `POST /disruptions/reconcile`.
 It classifies each complete-scenario item as `ALREADY_REFLECTED`,

@@ -10,11 +10,16 @@ import pytest
 from app.integrations.contracts import (
     Evidence, EvidenceKind, FilterRequest, InterpretationRequest, ProcessingStatus,
     SignalClass, DisruptionContract, HypothesisGenerationRequest, GenerationEntity,
+    PlannerRequest, RiskGenerationRequest,
 )
-from app.integrations.factory import get_hypothesis_provider, get_provider_bundle
+from app.integrations.factory import (
+    get_hypothesis_provider, get_planner_provider, get_provider_bundle, get_risk_provider,
+)
 from app.integrations.gemini import (
     GeminiAPIError, GeminiFilterProvider, GeminiHypothesisProvider,
-    GeminiInterpreterProvider, GeminiRateLimitError, GeminiSchemaError,
+    GeminiInterpreterProvider, GeminiPlannerPanelProvider, GeminiPlannerProvider, GeminiRateLimitError,
+    GeminiRiskProvider, GeminiSchemaError, _GeminiPlannerOutput,
+    _GeminiRiskOutput, _gemini_schema,
 )
 from app.integrations.providers import StubEffectMappingProvider, StubFilterProvider
 
@@ -74,6 +79,54 @@ def interpreter_payload(**changes) -> dict:
 
 def client_for(handler) -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+def test_gemini_risk_and_planner_attach_shared_model_metadata():
+    responses = [
+        {"proposals": [{"proposal_id": "risk-1", "name": "Port risk",
+            "description": "Capacity scenario", "selected_signal_version_ids": [],
+            "hypothetical_disruptions": [{"type": "PORT_CAPACITY_CHANGE",
+                "payload_json": json.dumps({"target_ids": ["port-1"]})}],
+            "occurrence_probability": 0.7, "assumptions": [],
+            "rationale": "Capacity may fall."}], "warnings": []},
+        {"proposals": [{"proposal_id": "plan-1", "name": "Reroute",
+            "interventions": [{"type": "REROUTE",
+                "payload_json": json.dumps({"target_ids": ["port-1"]})}],
+            "rationale": "Protect continuity.", "assumptions": [],
+            "expected_qualitative_effects": []}], "warnings": []},
+    ]
+    client = client_for(lambda _request: gemini_response(responses.pop(0)))
+    risk = GeminiRiskProvider(api_key="secret", model="gemini-shared", client=client)
+    risk_result = run(risk.propose_scenarios(RiskGenerationRequest(
+        context_summary={}, context_version="context-v1", state_version="state-v1",
+        disruption_contracts=[{"type": "PORT_CAPACITY_CHANGE", "target_types": ["PORT"],
+            "payload_schema": {"type": "object"}, "schema_hash": "b" * 64}],
+        entity_scope=[GenerationEntity(entity_id="port-1", entity_type="PORT",
+            display_name="Port One")], generation_limit=1)))
+    planner = GeminiPlannerProvider(api_key="secret", model="gemini-shared", client=client)
+    plan_result = run(planner.propose_plans(PlannerRequest(
+        planning_cycle_id="cycle-1", scenario_id="scenario-1", context_version="context-v1",
+        state_version="state-v1", disruptions=[], baseline_run_id="run-1",
+        baseline_results={"late_shipments": 3}, intervention_contracts=[{
+            "type": "REROUTE", "target_types": ["PORT"], "payload_schema": {"type": "object"},
+            "schema_hash": "a" * 64}], proposal_limit=1, known_entity_ids=["port-1"])))
+    assert risk_result.proposals[0].metadata.model == "gemini-shared"
+    assert plan_result.proposals[0].metadata.model == "gemini-shared"
+    assert risk_result.proposals[0].hypothetical_disruptions[0].payload == {
+        "target_ids": ["port-1"]}
+    assert plan_result.proposals[0].interventions[0].payload == {"target_ids": ["port-1"]}
+    assert risk_result.metadata.stub is False and plan_result.metadata.stub is False
+    run(client.aclose())
+
+
+@pytest.mark.parametrize("output_type", [_GeminiRiskOutput, _GeminiPlannerOutput])
+def test_planning_response_schemas_use_gemini_supported_subset(output_type):
+    encoded = json.dumps(_gemini_schema(output_type))
+    assert '"title"' not in encoded
+    assert '"maxItems"' not in encoded
+    assert '"minimum"' not in encoded
+    assert '"$ref"' not in encoded
+    assert '"payload_json"' in encoded
 
 
 def test_filter_calls_structured_endpoint_and_attaches_trusted_metadata():
@@ -312,7 +365,54 @@ def test_factory_still_rejects_unsupported_provider_names(monkeypatch):
         get_provider_bundle()
 
 
-def test_hypothesis_factory_uses_gemini_when_key_is_available(monkeypatch):
+def test_hypothesis_factory_retains_explicit_gemini_compatibility(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "secret")
-    monkeypatch.delenv("HYPOTHESIS_PROVIDER", raising=False)
+    monkeypatch.setenv("HYPOTHESIS_PROVIDER", "gemini")
     assert isinstance(get_hypothesis_provider(), GeminiHypothesisProvider)
+
+
+def test_planning_factories_select_gemini_with_the_shared_settings(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "secret")
+    monkeypatch.setenv("GEMINI_MODEL", "gemini-shared")
+    monkeypatch.setenv("RISK_PROVIDER", "gemini")
+    monkeypatch.setenv("PLANNER_PROVIDER", "gemini")
+    risk = get_risk_provider()
+    planner = get_planner_provider("panel")
+    assert isinstance(risk, GeminiRiskProvider)
+    assert isinstance(planner, GeminiPlannerPanelProvider)
+    assert risk._model == planner._model == "gemini-shared"
+
+
+def test_gemini_planner_panel_calls_role_agents_and_labels_proposals():
+    seen_prompts = []
+
+    def handler(request):
+        payload = json.loads(request.content)
+        seen_prompts.append(payload["systemInstruction"]["parts"][0]["text"])
+        role = next(role for role in ("continuity", "cost")
+                    if f"Panel role: {role}." in seen_prompts[-1])
+        return gemini_response({"proposals": [{"proposal_id": "plan-1",
+            "name": f"{role.title()} plan", "interventions": [{"type": "REROUTE",
+                "payload_json": json.dumps({"target_ids": ["port-1"]})}],
+            "rationale": "Role-specific rationale.", "assumptions": [],
+            "expected_qualitative_effects": []}], "warnings": []})
+
+    client = client_for(handler)
+    provider = GeminiPlannerPanelProvider(api_key="secret", model="gemini-panel-test",
+        client=client, agent_prompts=["Base planner prompt.", "Base planner prompt."],
+        agent_count=2)
+    result = run(provider.propose_plans(PlannerRequest(
+        planning_cycle_id="cycle-1", scenario_id="scenario-1", context_version="context-v1",
+        state_version="state-v1", disruptions=[], baseline_run_id="run-1",
+        baseline_results={"late_shipments": 3}, intervention_contracts=[{
+            "type": "REROUTE", "target_types": ["PORT"], "payload_schema": {"type": "object"},
+            "schema_hash": "a" * 64}], proposal_limit=2, known_entity_ids=["port-1"])))
+
+    assert [item.proposal_id for item in result.proposals] == [
+        "continuity-plan-1", "cost-plan-1"]
+    assert [item.metadata.prompt_version for item in result.proposals] == [
+        "panel-continuity-v1", "panel-cost-v1"]
+    assert all(item.metadata.provider == "gemini-panel" for item in result.proposals)
+    assert len(seen_prompts) == 2
+    assert all("Base planner prompt." in prompt for prompt in seen_prompts)
+    run(client.aclose())

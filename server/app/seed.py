@@ -14,7 +14,8 @@ def seed() -> None:
         session.merge(DataSourceRecord(
             id="manual-evidence", name="Manual evidence", type="UPLOAD",
             description="Platform-owned source for uploaded and manually entered evidence",
-            url=None, enabled=True, scrape_interval_minutes=None, scraper_type=None,
+            url=None, enabled=True, schedule_enabled=False,
+            scrape_interval_minutes=None, scraper_type=None,
             scraper_config_json=None, last_run_at=None, next_run_at=None,
             last_status="NEVER", last_error=None, created_at=now, updated_at=now,
         ))

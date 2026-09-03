@@ -19,12 +19,22 @@ function evidenceExcerpt(item: Evidence): string {
     return compact.length > 180 ? `${compact.slice(0, 177)}…` : compact;
 }
 
+function percentage(value: number | null): string {
+    return value === null ? "Unavailable" : `${Math.round(value * 100)}%`;
+}
+
+function timestamp(value: string | null): string {
+    return value ? new Date(value).toLocaleString() : "Open-ended";
+}
+
 export default function ReviewControls({
     signals,
     evidence,
+    readOnly = false,
 }: {
     signals: Signal[];
     evidence: Evidence[];
+    readOnly?: boolean;
 }) {
     const router = useRouter();
     const [busy, setBusy] = useState<string | null>(null);
@@ -73,7 +83,9 @@ export default function ReviewControls({
             )}
             {signals.length === 0 ? (
                 <p className="rounded-xl border border-dashed border-slate-700 p-10 text-center text-slate-400">
-                    No signals are waiting for review.
+                    {readOnly
+                        ? "No accepted signals."
+                        : "No signals are waiting for review."}
                 </p>
             ) : (
                 signals.map((signal) => {
@@ -94,12 +106,14 @@ export default function ReviewControls({
                                             {signal.signal_type}
                                         </h2>
                                         <span
-                                            className={`rounded-full border px-2 py-1 text-xs ${canAccept ? "border-emerald-800 text-emerald-300" : "border-amber-800 text-amber-300"}`}
+                                            className={`rounded-full border px-2 py-1 text-xs ${readOnly || canAccept ? "border-emerald-800 text-emerald-300" : "border-amber-800 text-amber-300"}`}
                                         >
-                                            {signal.processing_state.replaceAll(
-                                                "_",
-                                                " ",
-                                            )}
+                                            {readOnly
+                                                ? "ACCEPTED"
+                                                : signal.processing_state.replaceAll(
+                                                      "_",
+                                                      " ",
+                                                  )}
                                         </span>
                                     </div>
                                     <p className="mt-1 text-sm text-slate-400">
@@ -120,7 +134,7 @@ export default function ReviewControls({
                                         </p>
                                     )}
                                 </div>
-                                <div className="flex gap-2">
+                                {!readOnly && <div className="flex gap-2">
                                     <button
                                         disabled={busy !== null || !canAccept}
                                         title={
@@ -144,8 +158,45 @@ export default function ReviewControls({
                                     >
                                         Reject
                                     </button>
-                                </div>
+                                </div>}
                             </div>
+                            <section className="mt-4 rounded-lg border border-slate-800 bg-slate-950/60 p-4">
+                                <h3 className="text-sm font-medium text-slate-200">
+                                    Signal shape
+                                </h3>
+                                <dl className="mt-3 grid gap-x-6 gap-y-3 text-xs sm:grid-cols-2 lg:grid-cols-3">
+                                    {[
+                                        ["Signal version", signal.id],
+                                        ["Classification", signal.classification],
+                                        ["Lifecycle", signal.lifecycle_status],
+                                        ["Starts", timestamp(signal.temporal_window.starts_at)],
+                                        ["Ends", timestamp(signal.temporal_window.ends_at)],
+                                        ["Extraction confidence", percentage(signal.extraction_confidence)],
+                                        ["Grounding confidence", percentage(signal.grounding_confidence)],
+                                        ["Mapping confidence", percentage(signal.mapping_confidence)],
+                                        ["Context version", signal.context_version],
+                                        ["Catalog version", signal.catalog_version ?? "Unavailable"],
+                                        ["Mapping outcome", signal.mapping_outcome ?? "Not mapped"],
+                                    ].map(([label, value]) => (
+                                        <div key={label}>
+                                            <dt className="text-slate-500">{label}</dt>
+                                            <dd className="mt-1 break-words font-mono text-slate-300">
+                                                {value}
+                                            </dd>
+                                        </div>
+                                    ))}
+                                </dl>
+                            </section>
+                            {signal.mapping_proposal && (
+                                <section className="mt-4">
+                                    <h3 className="text-sm text-slate-500">
+                                        Proposed disruption
+                                    </h3>
+                                    <pre className="mt-2 overflow-auto rounded-lg bg-slate-950 p-3 text-xs text-slate-300">
+                                        {JSON.stringify(signal.mapping_proposal, null, 2)}
+                                    </pre>
+                                </section>
+                            )}
                             <div className="mt-4 grid gap-4 text-sm sm:grid-cols-2">
                                 <div>
                                     <h3 className="text-slate-500">
@@ -250,15 +301,25 @@ export default function ReviewControls({
                             )}
                             <details className="mt-4">
                                 <summary className="cursor-pointer text-sm text-sky-300">
-                                    Review details
+                                    {readOnly ? "Signal details" : "Review details"}
                                 </summary>
-                                <pre className="mt-3 overflow-auto rounded-lg bg-slate-950 p-3 text-xs text-slate-300">
-                                    {JSON.stringify(
-                                        signal.normalized_disruption,
-                                        null,
-                                        2,
-                                    )}
-                                </pre>
+                                <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                                    {[
+                                        ["Normalized disruption", signal.normalized_disruption],
+                                        ["Local validation", signal.local_validation],
+                                        ["Client validation", signal.client_validation],
+                                        ["Provider metadata", signal.provider_metadata],
+                                    ].map(([label, value]) => (
+                                        <section key={String(label)}>
+                                            <h3 className="mb-2 text-xs text-slate-500">
+                                                {String(label)}
+                                            </h3>
+                                            <pre className="overflow-auto rounded-lg bg-slate-950 p-3 text-xs text-slate-300">
+                                                {JSON.stringify(value, null, 2)}
+                                            </pre>
+                                        </section>
+                                    ))}
+                                </div>
                             </details>
                         </article>
                     );

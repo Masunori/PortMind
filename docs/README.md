@@ -21,6 +21,9 @@
 | Work on providers or orchestration | [AI and workflow](ai-and-workflow.md) |
 | Find an endpoint | [API reference](api-reference.md) |
 | Configure or deploy the stack | [Operations](operations.md) |
+| Deploy the low-cost hackathon stack | [Serverless hackathon deployment roadmap](serverless-hackathon-deployment-roadmap.md) |
+| Implement DynamoDB persistence | [DynamoDB data model](dynamodb-data-model.md) |
+| Review or smoke-test Bedrock | [Bedrock verification](bedrock-verification.md) |
 
 ## Suggested code-reading path
 
@@ -33,6 +36,7 @@ server/app/main.py
 → server/tests/test_<capability>.py
 ```
 
-The repository contains one canonical workflow based on `evidence`, immutable
-`signal_versions`, and `experiment_packages`. Read [Architecture](architecture.md)
-before changing the platform/client ownership boundary.
+The repository contains two connected workflows: reviewed signals can become immutable
+`experiment_packages`, while risk and mitigation evaluation is retained in
+`planning_cycles`. Read [Architecture](architecture.md) before changing either workflow
+or the platform/client ownership boundary.

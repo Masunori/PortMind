@@ -2,11 +2,13 @@
 
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+import asyncio
 import os
 from collections.abc import AsyncIterator
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from mangum import Mangum
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -14,6 +16,7 @@ from app.api.evidence import router as evidence_router
 from app.api.experiment import router as experiment_router
 from app.api.plan import router as plan_router
 from app.api.planning import router as planning_router
+from app.api.prompts import router as prompts_router
 from app.api.source import router as source_router
 from app.api.scenario import router as scenario_router
 from app.api.signal import router as signal_router
@@ -21,7 +24,7 @@ from app.database import engine
 from app.integrations import get_client_gateway
 from app.integrations.errors import ClientGatewayError
 from app.integrations.gateway import ClientGateway
-from app.scheduler import build_scheduler
+from app.scheduler import build_scheduler, scheduling_enabled
 
 
 @asynccontextmanager
@@ -29,7 +32,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Optionally run local source scheduling for this application process."""
 
     scheduler = None
-    if os.getenv("ENABLE_SOURCE_SCHEDULER", "false").casefold() == "true":
+    if scheduling_enabled():
         scheduler = build_scheduler()
         scheduler.start()
     yield
@@ -48,10 +51,10 @@ app.include_router(evidence_router)
 app.include_router(experiment_router)
 app.include_router(plan_router)
 app.include_router(planning_router)
+app.include_router(prompts_router)
 app.include_router(source_router)
 app.include_router(scenario_router)
 app.include_router(signal_router)
-
 
 @app.get("/health", tags=["system"])
 async def health() -> dict[str, str]:
@@ -97,3 +100,19 @@ def database_health() -> dict[str, str]:
         raise HTTPException(status_code=503, detail="database unavailable") from error
 
     return {"status": "ok", "database": "ok"}
+
+
+# Lambda uses the fully assembled ASGI application without starting process-local
+# services. Lifespan remains active under Uvicorn for explicitly enabled local use.
+asyncio.set_event_loop(asyncio.new_event_loop())
+_lambda_adapter = Mangum(app, lifespan="off")
+
+
+def handler(event: dict[str, object], context: object) -> dict[str, object]:
+    """Handle a Function URL event, restoring a loop when Python has cleared it."""
+
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+    return _lambda_adapter(event, context)

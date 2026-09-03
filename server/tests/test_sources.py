@@ -30,7 +30,9 @@ from app.services.source_service import (
 )
 
 
-def website(name: str = "Port notices", interval: int = 30) -> DataSourceCreate:
+def website(
+    name: str = "Port notices", interval: int = 30, *, scheduled: bool = False,
+) -> DataSourceCreate:
     """Build one valid website source request."""
 
     return DataSourceCreate(
@@ -39,6 +41,7 @@ def website(name: str = "Port notices", interval: int = 30) -> DataSourceCreate:
         url="https://example.com/notices",
         scrape_interval_minutes=interval,
         scraper_type="HTML",
+        schedule_enabled=scheduled,
     )
 
 
@@ -92,8 +95,8 @@ def test_discovery_configuration_is_normalized() -> None:
 def test_source_crud_and_independent_schedules(test_session_factory) -> None:
     """Sources retain independent schedules and support the complete lifecycle."""
 
-    fast = create_source(website("Fast", 10))
-    slow = create_source(website("Slow", 30))
+    fast = create_source(website("Fast", 10, scheduled=True))
+    slow = create_source(website("Slow", 30, scheduled=True))
 
     assert [item.name for item in get_sources()] == ["Fast", "Slow"]
     assert fast.next_run_at is not None
@@ -113,10 +116,31 @@ def test_source_crud_and_independent_schedules(test_session_factory) -> None:
     assert delete_source(fast.id) is False
 
 
+def test_website_scheduling_is_opt_in_and_independent_from_source_enablement(
+    test_session_factory,
+) -> None:
+    """Only explicitly scheduled, enabled scrapers receive a next-run time."""
+
+    source = create_source(website())
+    assert source.enabled is True
+    assert source.schedule_enabled is False
+    assert source.next_run_at is None
+
+    scheduled = update_source(source.id, DataSourceUpdate(schedule_enabled=True))
+    assert scheduled is not None
+    assert scheduled.schedule_enabled is True
+    assert scheduled.next_run_at is not None
+
+    disabled = update_source(source.id, DataSourceUpdate(enabled=False))
+    assert disabled is not None
+    assert disabled.schedule_enabled is True
+    assert disabled.next_run_at is None
+
+
 def test_source_update_revalidates_website_configuration(test_session_factory) -> None:
     """Partial edits cannot leave a website source in an invalid state."""
 
-    source = create_source(website())
+    source = create_source(website(scheduled=True))
     with pytest.raises(ValidationError, match=r"HTTP\(S\) URL"):
         update_source(source.id, DataSourceUpdate(url=None))
 
@@ -126,7 +150,7 @@ def test_source_update_replaces_complete_scraper_configuration(
 ) -> None:
     """A website edit persists schedule, URL, and every discovery control."""
 
-    source = create_source(website())
+    source = create_source(website(scheduled=True))
     updated = update_source(
         source.id,
         DataSourceUpdate(
@@ -172,6 +196,7 @@ def test_source_api_crud(test_session_factory) -> None:
             "url": "https://example.com/weather",
             "scrape_interval_minutes": 15,
             "scraper_type": "HTML",
+            "schedule_enabled": True,
         })
     )
     assert source_api.sources()[0].name == "Weather alerts"
@@ -397,7 +422,7 @@ def test_scheduler_retains_unexpected_processing_failure(
 ) -> None:
     """Scheduled processing exceptions affect health while normal outcomes do not."""
 
-    source = create_source(website())
+    source = create_source(website(scheduled=True))
     recorded: list[tuple[str, str | None]] = []
     monkeypatch.setattr(scheduler_service, "get_due_sources", lambda _now: [source])
     monkeypatch.setattr(

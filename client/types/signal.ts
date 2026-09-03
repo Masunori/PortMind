@@ -29,5 +29,11 @@ export interface Signal {
     processing_state: string;
     mapping_outcome: string | null;
     mapping_errors: string[];
+    mapping_proposal: Record<string, unknown> | null;
+    local_validation: Record<string, unknown> | null;
+    client_validation: Record<string, unknown> | null;
     normalized_disruption: Record<string, unknown> | null;
+    catalog_version: string | null;
+    schema_hash: string | null;
+    provider_metadata: Record<string, unknown>;
 }

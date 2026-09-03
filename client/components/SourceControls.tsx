@@ -3,7 +3,11 @@
 import { FormEvent, ReactNode, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
-import type { DataSource, SourceCollectionResult } from "@/types/source";
+import type {
+    DataSource,
+    SchedulingStatus,
+    SourceCollectionResult,
+} from "@/types/source";
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const input =
@@ -51,7 +55,13 @@ function collectionMessage(result: SourceCollectionResult): string {
     return `Collection complete: ${result.created_evidence} new, ${result.duplicate_evidence} duplicate.${processing}${collectionErrors}${processingErrors}`;
 }
 
-export default function SourceControls({ sources }: { sources: DataSource[] }) {
+export default function SourceControls({
+    sources,
+    scheduling,
+}: {
+    sources: DataSource[];
+    scheduling: SchedulingStatus;
+}) {
     const router = useRouter();
     const [busy, setBusy] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
@@ -109,6 +119,7 @@ export default function SourceControls({ sources }: { sources: DataSource[] }) {
             description: form.get("description"),
             url: form.get("url"),
             enabled: form.get("enabled") === "on",
+            schedule_enabled: form.get("schedule_enabled") === "on",
             scrape_interval_minutes: Number(form.get("interval")),
             scraper_type: "HTML",
             scraper_config_json: {
@@ -152,6 +163,17 @@ export default function SourceControls({ sources }: { sources: DataSource[] }) {
 
     return (
         <div className="space-y-6">
+            <div
+                className={`rounded-lg border p-3 text-sm ${
+                    scheduling.enabled
+                        ? "border-emerald-800 bg-emerald-950 text-emerald-200"
+                        : "border-slate-700 bg-slate-900 text-slate-300"
+                }`}
+            >
+                Automatic collection is globally {scheduling.enabled ? "on" : "off"}.
+                {!scheduling.enabled &&
+                    " Per-scraper schedules are saved but will not run; Collect now remains available."}
+            </div>
             {error && (
                 <p
                     role="alert"
@@ -279,6 +301,10 @@ export default function SourceControls({ sources }: { sources: DataSource[] }) {
                         Enabled
                     </label>
                     <label className="text-sm">
+                        <input type="checkbox" name="schedule_enabled" />{" "}
+                        Schedule automatic collection
+                    </label>
+                    <label className="text-sm">
                         <input
                             type="checkbox"
                             name="discovery"
@@ -327,6 +353,17 @@ export default function SourceControls({ sources }: { sources: DataSource[] }) {
                                     {source.url ?? source.type} ·{" "}
                                     {source.last_status}
                                 </p>
+                                {source.type === "WEBSITE" && (
+                                    <p className="mt-1 text-xs text-slate-400">
+                                        Schedule: {source.schedule_enabled ? "enabled" : "off"}
+                                        {source.schedule_enabled && !scheduling.enabled
+                                            ? " (global scheduler off)"
+                                            : ""}
+                                        {source.next_run_at
+                                            ? ` · next ${new Date(source.next_run_at).toLocaleString()}`
+                                            : ""}
+                                    </p>
+                                )}
                                 {source.last_error && (
                                     <p className="mt-1 text-xs text-red-300">
                                         {source.last_error}
@@ -569,6 +606,14 @@ export default function SourceControls({ sources }: { sources: DataSource[] }) {
                                                 }
                                             />{" "}
                                             Discover linked articles
+                                        </label>
+                                        <label className="self-end pb-2 text-sm">
+                                            <input
+                                                name="schedule_enabled"
+                                                type="checkbox"
+                                                defaultChecked={source.schedule_enabled}
+                                            />{" "}
+                                            Schedule automatic collection
                                         </label>
                                     </>
                                 )}

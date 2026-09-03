@@ -11,6 +11,22 @@ from app.services import source_service
 from app.services import scheduler_service
 from app.services import signal_service
 from app.services import planning_service
+from app.services import prompt_service
+
+
+@pytest.fixture(autouse=True)
+def deterministic_provider_environment(monkeypatch: pytest.MonkeyPatch):
+    """Prevent developer cloud settings from leaking into deterministic tests."""
+
+    for name in (
+        "FILTER_PROVIDER",
+        "INTERPRETER_PROVIDER",
+        "HYPOTHESIS_PROVIDER",
+        "RISK_PROVIDER",
+        "PLANNER_PROVIDER",
+        "BEDROCK_MODEL_ID",
+    ):
+        monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture
@@ -32,6 +48,7 @@ def test_session_factory(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(experiment_service, "SessionLocal", factory)
     monkeypatch.setattr(signal_service, "SessionLocal", factory)
     monkeypatch.setattr(planning_service, "SessionLocal", factory)
+    monkeypatch.setattr(prompt_service, "SessionLocal", factory)
     monkeypatch.setattr(source_service, "SessionLocal", factory)
     monkeypatch.setattr(scheduler_service, "get_due_sources", source_service.get_due_sources)
     monkeypatch.setattr(scheduler_service, "record_source_run", source_service.record_source_run)

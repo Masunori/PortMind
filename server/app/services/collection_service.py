@@ -5,6 +5,7 @@ import logging
 from app.domain.source import DataSource, SourceCollectionResult, SourceProcessingError
 from app.ingestion.discovery import discover_and_scrape_source
 from app.integrations.gateway import ClientGateway
+from app.integrations.bedrock import BedrockRateLimitError
 from app.integrations.gemini import GeminiRateLimitError
 from app.integrations.providers import ProviderBundle
 from app.services.signal_service import process_evidence
@@ -43,13 +44,13 @@ async def collect_and_process_source(
                     evidence_id=evidence.id,
                     message=f"Unexpected processing state: {signal.processing_state}",
                 ))
-        except GeminiRateLimitError as error:
-            logger.warning("Deferring evidence processing after Gemini rate limit: %s", evidence.id)
+        except (BedrockRateLimitError, GeminiRateLimitError) as error:
+            logger.warning("Deferring evidence processing after provider rate limit: %s", evidence.id)
             deferred = processable[index:]
             result.processing.deferred += len(deferred)
             result.processing.errors.extend(SourceProcessingError(
                 evidence_id=item.id, message=str(error) if item.id == evidence.id
-                else "Processing deferred because the Gemini quota is temporarily unavailable",
+                else "Processing deferred because the model-provider quota is temporarily unavailable",
             ) for item in deferred)
             break
         except Exception:

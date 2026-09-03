@@ -437,6 +437,9 @@ def test_planning_api_generates_reviews_runs_and_auto_proposes(test_session_fact
     completed = run(planning_api.submit_baseline(reviewed.id, gateway))
     assert completed.baseline_metrics is not None
     assert completed.plans
+    assert completed.status == PlanningLifecycle.RECOMMENDED
+    assert all(item.intervention_run_id for item in completed.plans)
+    assert sum(name == "submit_simulation" for name, _ in gateway.calls) == 1 + len(completed.plans)
     assert get_cycle(draft.id) == completed
 
 
@@ -469,8 +472,26 @@ def test_panel_mode_is_persisted_and_auto_generates_panel_plans(test_session_fac
     assert completed.planner_mode == "panel"
     assert {item.planner_metadata["provider"] for item in completed.plans} == {"stub-panel"}
     assert len(completed.plans) == 3
+    assert completed.status == PlanningLifecycle.RECOMMENDED
+    assert sorted(item.rank for item in completed.plans) == [1, 2, 3]
     assert completed.planning_objectives == ["protect service"]
     assert completed.hard_constraints == {"total_cost": 200}
+
+
+def test_panel_agent_count_is_persisted_and_bounds_generated_plans(test_session_factory):
+    gateway = completed_gateway()
+    draft = run(planning_api.create_cycle(planning_api.CycleCreate(
+        generation_limit=5, planner_mode="panel", panel_agent_count=5,
+        entity_scope=[entity()]), gateway))
+    completed = run(planning_api.submit_baseline(draft.id, gateway))
+    assert completed.panel_agent_count == 5
+    assert len(completed.plans) == 5
+
+
+@pytest.mark.parametrize("count", [0, 6])
+def test_panel_agent_count_must_be_between_one_and_five(count):
+    with pytest.raises(ValidationError):
+        planning_api.CycleCreate(planner_mode="panel", panel_agent_count=count)
 
 
 def test_hypothesis_api_returns_reviewable_proposals_without_persistence(test_session_factory):
