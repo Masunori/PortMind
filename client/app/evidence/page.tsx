@@ -7,16 +7,29 @@ const pageSize = 20;
 export default async function EvidencePage({
     searchParams,
 }: {
-    searchParams: Promise<{ view?: string; page?: string; duplicates?: string }>;
+    searchParams: Promise<{
+        view?: string;
+        page?: string;
+        duplicates?: string;
+    }>;
 }) {
-    const { view, page: pageValue, duplicates: duplicatesValue } = await searchParams;
+    const {
+        view,
+        page: pageValue,
+        duplicates: duplicatesValue,
+    } = await searchParams;
     const archived = view === "archive";
     const includeDuplicates = duplicatesValue === "true";
     const parsedPage = Number.parseInt(pageValue ?? "1", 10);
     const page = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1;
 
     const [items, sources] = await Promise.all([
-        getEvidence(archived, pageSize + 1, (page - 1) * pageSize, includeDuplicates),
+        getEvidence(
+            archived,
+            pageSize + 1,
+            (page - 1) * pageSize,
+            includeDuplicates,
+        ),
         getSources(),
     ]);
     const hasNext = items.length > pageSize;
@@ -37,8 +50,8 @@ export default async function EvidencePage({
                         Evidence workspace
                     </h1>
                     <p className="mt-2 text-sm text-slate-400">
-                        Create, upload, edit, retain, redact, archive, and delete
-                        evidence under audit protections.
+                        Create, upload, edit, retain, redact, archive, and
+                        delete evidence under audit protections.
                     </p>
                 </header>
 
@@ -59,11 +72,18 @@ export default async function EvidencePage({
                     >
                         Archive
                     </a>
-                    <a href={`/evidence?${new URLSearchParams({
-                        ...(archived ? { view: "archive" } : {}),
-                        ...(includeDuplicates ? {} : { duplicates: "true" }),
-                    })}`} className={`rounded-lg px-4 py-2 text-sm ${includeDuplicates ? "bg-violet-700" : "bg-slate-900"}`}>
-                        {includeDuplicates ? "Hide duplicates" : "Include duplicates"}
+                    <a
+                        href={`/evidence?${new URLSearchParams({
+                            ...(archived ? { view: "archive" } : {}),
+                            ...(includeDuplicates
+                                ? {}
+                                : { duplicates: "true" }),
+                        })}`}
+                        className={`rounded-lg px-4 py-2 text-sm ${includeDuplicates ? "bg-violet-700" : "bg-slate-900"}`}
+                    >
+                        {includeDuplicates
+                            ? "Hide duplicates"
+                            : "Include duplicates"}
                     </a>
                 </div>
 

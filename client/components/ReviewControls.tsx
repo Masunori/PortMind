@@ -134,31 +134,35 @@ export default function ReviewControls({
                                         </p>
                                     )}
                                 </div>
-                                {!readOnly && <div className="flex gap-2">
-                                    <button
-                                        disabled={busy !== null || !canAccept}
-                                        title={
-                                            !canAccept
-                                                ? "Resolve processing issues before accepting"
-                                                : undefined
-                                        }
-                                        onClick={() =>
-                                            void decide(signal, "ACCEPTED")
-                                        }
-                                        className="rounded-lg bg-emerald-700 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-40"
-                                    >
-                                        Accept
-                                    </button>
-                                    <button
-                                        disabled={busy !== null}
-                                        onClick={() =>
-                                            void decide(signal, "REJECTED")
-                                        }
-                                        className="rounded-lg border border-red-800 px-3 py-2 text-sm text-red-300"
-                                    >
-                                        Reject
-                                    </button>
-                                </div>}
+                                {!readOnly && (
+                                    <div className="flex gap-2">
+                                        <button
+                                            disabled={
+                                                busy !== null || !canAccept
+                                            }
+                                            title={
+                                                !canAccept
+                                                    ? "Resolve processing issues before accepting"
+                                                    : undefined
+                                            }
+                                            onClick={() =>
+                                                void decide(signal, "ACCEPTED")
+                                            }
+                                            className="rounded-lg bg-emerald-700 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-40"
+                                        >
+                                            Accept
+                                        </button>
+                                        <button
+                                            disabled={busy !== null}
+                                            onClick={() =>
+                                                void decide(signal, "REJECTED")
+                                            }
+                                            className="rounded-lg border border-red-800 px-3 py-2 text-sm text-red-300"
+                                        >
+                                            Reject
+                                        </button>
+                                    </div>
+                                )}
                             </div>
                             <section className="mt-4 rounded-lg border border-slate-800 bg-slate-950/60 p-4">
                                 <h3 className="text-sm font-medium text-slate-200">
@@ -167,19 +171,61 @@ export default function ReviewControls({
                                 <dl className="mt-3 grid gap-x-6 gap-y-3 text-xs sm:grid-cols-2 lg:grid-cols-3">
                                     {[
                                         ["Signal version", signal.id],
-                                        ["Classification", signal.classification],
+                                        [
+                                            "Classification",
+                                            signal.classification,
+                                        ],
                                         ["Lifecycle", signal.lifecycle_status],
-                                        ["Starts", timestamp(signal.temporal_window.starts_at)],
-                                        ["Ends", timestamp(signal.temporal_window.ends_at)],
-                                        ["Extraction confidence", percentage(signal.extraction_confidence)],
-                                        ["Grounding confidence", percentage(signal.grounding_confidence)],
-                                        ["Mapping confidence", percentage(signal.mapping_confidence)],
-                                        ["Context version", signal.context_version],
-                                        ["Catalog version", signal.catalog_version ?? "Unavailable"],
-                                        ["Mapping outcome", signal.mapping_outcome ?? "Not mapped"],
+                                        [
+                                            "Starts",
+                                            timestamp(
+                                                signal.temporal_window
+                                                    .starts_at,
+                                            ),
+                                        ],
+                                        [
+                                            "Ends",
+                                            timestamp(
+                                                signal.temporal_window.ends_at,
+                                            ),
+                                        ],
+                                        [
+                                            "Extraction confidence",
+                                            percentage(
+                                                signal.extraction_confidence,
+                                            ),
+                                        ],
+                                        [
+                                            "Grounding confidence",
+                                            percentage(
+                                                signal.grounding_confidence,
+                                            ),
+                                        ],
+                                        [
+                                            "Mapping confidence",
+                                            percentage(
+                                                signal.mapping_confidence,
+                                            ),
+                                        ],
+                                        [
+                                            "Context version",
+                                            signal.context_version,
+                                        ],
+                                        [
+                                            "Catalog version",
+                                            signal.catalog_version ??
+                                                "Unavailable",
+                                        ],
+                                        [
+                                            "Mapping outcome",
+                                            signal.mapping_outcome ??
+                                                "Not mapped",
+                                        ],
                                     ].map(([label, value]) => (
                                         <div key={label}>
-                                            <dt className="text-slate-500">{label}</dt>
+                                            <dt className="text-slate-500">
+                                                {label}
+                                            </dt>
                                             <dd className="mt-1 break-words font-mono text-slate-300">
                                                 {value}
                                             </dd>
@@ -193,7 +239,11 @@ export default function ReviewControls({
                                         Proposed disruption
                                     </h3>
                                     <pre className="mt-2 overflow-auto rounded-lg bg-slate-950 p-3 text-xs text-slate-300">
-                                        {JSON.stringify(signal.mapping_proposal, null, 2)}
+                                        {JSON.stringify(
+                                            signal.mapping_proposal,
+                                            null,
+                                            2,
+                                        )}
                                     </pre>
                                 </section>
                             )}
@@ -301,14 +351,28 @@ export default function ReviewControls({
                             )}
                             <details className="mt-4">
                                 <summary className="cursor-pointer text-sm text-sky-300">
-                                    {readOnly ? "Signal details" : "Review details"}
+                                    {readOnly
+                                        ? "Signal details"
+                                        : "Review details"}
                                 </summary>
                                 <div className="mt-3 grid gap-3 lg:grid-cols-2">
                                     {[
-                                        ["Normalized disruption", signal.normalized_disruption],
-                                        ["Local validation", signal.local_validation],
-                                        ["Client validation", signal.client_validation],
-                                        ["Provider metadata", signal.provider_metadata],
+                                        [
+                                            "Normalized disruption",
+                                            signal.normalized_disruption,
+                                        ],
+                                        [
+                                            "Local validation",
+                                            signal.local_validation,
+                                        ],
+                                        [
+                                            "Client validation",
+                                            signal.client_validation,
+                                        ],
+                                        [
+                                            "Provider metadata",
+                                            signal.provider_metadata,
+                                        ],
                                     ].map(([label, value]) => (
                                         <section key={String(label)}>
                                             <h3 className="mb-2 text-xs text-slate-500">

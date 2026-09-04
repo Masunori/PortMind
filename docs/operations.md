@@ -102,6 +102,61 @@ against the client's semantic validation rules before a scenario draft is stored
 
 ## Development operations
 
+### DynamoDB Local foundation tests
+
+The local emulator verifies the table schema and repository adapters. Start it on host
+port `8001`:
+
+```bash
+docker compose -f compose.dev.yml --profile dynamodb up -d dynamodb-local
+cd server
+DYNAMODB_LOCAL_ENDPOINT=http://127.0.0.1:8001 \
+  ../.venv/bin/pytest -q tests/test_dynamodb_foundation.py \
+  tests/test_dynamodb_codec.py tests/test_dynamodb_local.py
+```
+
+The fixture uses Region `ap-southeast-1` by default; override it with
+`DYNAMODB_LOCAL_REGION`. Each test table is named `psa-test-<uuid>`, created on demand,
+and deleted after the test. A failed test may leave an isolated table; restart the
+in-memory container to clear all local data:
+
+```bash
+docker compose -f compose.dev.yml --profile dynamodb restart dynamodb-local
+```
+
+If the integration test is skipped, set `DYNAMODB_LOCAL_ENDPOINT`. Connection failures
+usually mean the profile service is not running or port `8001` is occupied. Remote
+endpoints are deliberately rejected so tests cannot create or delete tables in an AWS
+account.
+
+To run the application on the emulator, create its table once and explicitly select
+the backend:
+
+```bash
+cd server
+AWS_ACCESS_KEY_ID=localTestKey AWS_SECRET_ACCESS_KEY=localTestSecret \
+AWS_REGION=ap-southeast-1 ../.venv/bin/python -c \
+  "import boto3; from app.repositories.dynamodb.schema import create_table; create_table(boto3.resource('dynamodb', region_name='ap-southeast-1', endpoint_url='http://127.0.0.1:8001'), 'psa-local')"
+cd ..
+PERSISTENCE_BACKEND=dynamodb docker compose -f compose.dev.yml --profile dynamodb up -d
+```
+
+Production requires `PERSISTENCE_BACKEND=dynamodb`, `DYNAMODB_TABLE_NAME`, and
+`AWS_REGION`; omit `DYNAMODB_ENDPOINT_URL` in AWS. Credentials come from boto3's
+workload-role/profile chain. The [SAM template](../infrastructure/template.yaml)
+creates the encrypted on-demand table, TTL, point-in-time recovery, and a policy with
+point, query, batch, and transaction actions but no table-wide read.
+
+SDK requests use standard retry mode with four attempts. Conditional, throttling,
+validation, authentication, timeout, transport, and service failures map to sanitized
+application persistence errors. They never cause backend switching.
+
+For rollback, stop writers, restore a point-in-time backup to a new table, update
+`DYNAMODB_TABLE_NAME`, and redeploy. PostgreSQL fallback is not automatic and requires
+a separately planned data migration. Alarm on throttles, system errors, latency, and
+unexpected request growth; apply on-demand throughput limits where Region support
+allows it.
+
 ```bash
 docker compose --env-file .env.local -f compose.dev.yml ps
 docker compose --env-file .env.local -f compose.dev.yml logs -f

@@ -36,7 +36,9 @@ export default async function ReviewPage({
                         Human review
                     </p>
                     <h1 className="mt-2 text-3xl font-bold">
-                        {accepted ? "Accepted signals" : "Signals awaiting review"}
+                        {accepted
+                            ? "Accepted signals"
+                            : "Signals awaiting review"}
                     </h1>
                     <p className="mt-2 text-sm text-slate-400">
                         {accepted
@@ -45,7 +47,10 @@ export default async function ReviewPage({
                     </p>
                 </header>
 
-                <nav aria-label="Signal review views" className="mb-6 flex gap-2 border-b border-slate-800">
+                <nav
+                    aria-label="Signal review views"
+                    className="mb-6 flex gap-2 border-b border-slate-800"
+                >
                     {[
                         ["Awaiting review", "/review", !accepted],
                         ["Accepted", "/review?view=accepted", accepted],
@@ -68,7 +73,11 @@ export default async function ReviewPage({
                     params={accepted ? { view: "accepted" } : {}}
                     className="mb-6"
                 />
-                <ReviewControls signals={signals} evidence={evidence} readOnly={accepted} />
+                <ReviewControls
+                    signals={signals}
+                    evidence={evidence}
+                    readOnly={accepted}
+                />
                 <Pagination
                     page={page}
                     hasNext={hasNext}

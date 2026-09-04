@@ -20,6 +20,10 @@ services:
       context: ./server
       dockerfile: Dockerfile.prod
     environment:
+      PERSISTENCE_BACKEND: ${PERSISTENCE_BACKEND:-postgres}
+      DYNAMODB_TABLE_NAME: ${DYNAMODB_TABLE_NAME:-}
+      DYNAMODB_ENDPOINT_URL: ${DYNAMODB_ENDPOINT_URL:-}
+      AWS_REGION: ${AWS_REGION:-}
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-psa}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@database:5432/${POSTGRES_DB:-psa}
       CLIENT_ORIGIN: ${CLIENT_ORIGIN:?Set CLIENT_ORIGIN}
       CLIENT_GATEWAY_URL: ${CLIENT_GATEWAY_URL:?Set CLIENT_GATEWAY_URL}

@@ -15,6 +15,22 @@ Converse structured output; see
 [AI and workflow](docs/ai-and-workflow.md) and [operations](docs/operations.md) for the
 provider boundaries, retry behavior, and configuration.
 
+## Backend tests
+
+Run the complete Python suite, including the shared DynamoDB Local contracts:
+
+```bash
+scripts/test-backend.sh
+```
+
+Install the tracked pre-push hook once to run that suite before every push:
+
+```bash
+scripts/install-git-hooks.sh
+```
+
+GitHub Actions also runs the same script on every push and pull request.
+
 ## Quick start
 Prerequisite:
 - Docker Engine or Docker Desktop with Docker Compose v2.
@@ -25,6 +41,7 @@ In the `/server`, create an `.env.local` file:
 POSTGRES_DB=psa
 POSTGRES_USER=psa
 POSTGRES_PASSWORD=replace-with-a-strong-password
+PERSISTENCE_BACKEND=postgres
 NEXT_PUBLIC_API_URL=http://localhost:8000
 
 CLIENT_GATEWAY=http
@@ -99,7 +116,8 @@ Start with the [documentation index](docs/README.md), or jump directly to:
 ```text
 client/                 Next.js application
 server/app/api/         FastAPI route handlers
-server/app/services/    workflows and persistence operations
+server/app/services/    application workflows
+server/app/repositories/storage-neutral contracts and backend composition
 server/app/domain/      domain models and validation
 server/app/integrations client gateway and provider contracts
 server/alembic/         database migrations

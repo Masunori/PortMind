@@ -1,0 +1,167 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: PSA serverless API and persistence resources
+Parameters:
+  TableName:
+    Type: String
+    Default: psa-production
+  ClientOrigin:
+    Type: String
+    Description: Browser origin allowed to call the Lambda Function URL
+  ClientGatewayUrl:
+    Type: String
+    Description: Public base URL of the authoritative client integration API
+  ClientGatewayToken:
+    Type: String
+    Default: ''
+    NoEcho: true
+    Description: Optional bearer token for the authoritative client integration API
+  BedrockModelId:
+    Type: String
+    Description: Bedrock foundation model or inference profile ID
+Resources:
+  PersistenceTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName:
+        Ref: TableName
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      OnDemandThroughput:
+        MaxReadRequestUnits: 100
+        MaxWriteRequestUnits: 50
+      AttributeDefinitions:
+      - AttributeName: PK
+        AttributeType: S
+      - AttributeName: SK
+        AttributeType: S
+      - AttributeName: GSI1PK
+        AttributeType: S
+      - AttributeName: GSI1SK
+        AttributeType: S
+      - AttributeName: GSI2PK
+        AttributeType: S
+      - AttributeName: GSI2SK
+        AttributeType: S
+      KeySchema:
+      - AttributeName: PK
+        KeyType: HASH
+      - AttributeName: SK
+        KeyType: RANGE
+      GlobalSecondaryIndexes:
+      - IndexName: GSI1
+        KeySchema:
+        - AttributeName: GSI1PK
+          KeyType: HASH
+        - AttributeName: GSI1SK
+          KeyType: RANGE
+        Projection:
+          ProjectionType: ALL
+      - IndexName: GSI2
+        KeySchema:
+        - AttributeName: GSI2PK
+          KeyType: HASH
+        - AttributeName: GSI2SK
+          KeyType: RANGE
+        Projection:
+          ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+  PersistenceAccessPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - dynamodb:BatchGetItem
+          - dynamodb:BatchWriteItem
+          - dynamodb:DeleteItem
+          - dynamodb:DescribeTable
+          - dynamodb:GetItem
+          - dynamodb:PutItem
+          - dynamodb:Query
+          - dynamodb:TransactGetItems
+          - dynamodb:TransactWriteItems
+          - dynamodb:UpdateItem
+          Resource:
+          - Fn::GetAtt:
+            - PersistenceTable
+            - Arn
+          - Fn::Sub: ${PersistenceTable.Arn}/index/*
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ApiFunction
+      Handler: app.main.handler
+      Runtime: python3.13
+      Architectures:
+      - x86_64
+      MemorySize: 1024
+      Timeout: 60
+      Environment:
+        Variables:
+          PERSISTENCE_BACKEND: dynamodb
+          DYNAMODB_TABLE_NAME:
+            Ref: PersistenceTable
+          ENABLE_SOURCE_SCHEDULER: 'false'
+          CLIENT_ORIGIN:
+            Ref: ClientOrigin
+          CLIENT_GATEWAY_URL:
+            Ref: ClientGatewayUrl
+          CLIENT_GATEWAY_TOKEN:
+            Ref: ClientGatewayToken
+          FILTER_PROVIDER: bedrock
+          INTERPRETER_PROVIDER: bedrock
+          HYPOTHESIS_PROVIDER: bedrock
+          RISK_PROVIDER: bedrock
+          PLANNER_PROVIDER: bedrock
+          EFFECT_MAPPING_PROVIDER: stub
+          RELATIONSHIP_PROVIDER: stub
+          BEDROCK_MODEL_ID:
+            Ref: BedrockModelId
+          BEDROCK_REGION:
+            Ref: AWS::Region
+          BEDROCK_MAX_ATTEMPTS: '3'
+          BEDROCK_SDK_MAX_ATTEMPTS: '2'
+          BEDROCK_TIMEOUT_SECONDS: '60'
+          BEDROCK_MAX_TOKENS: '4096'
+      Policies:
+      - Ref: PersistenceAccessPolicy
+      - Statement:
+        - Sid: InvokeConfiguredBedrockModel
+          Effect: Allow
+          Action:
+          - bedrock:InvokeModel
+          Resource: '*'
+      FunctionUrlConfig:
+        AuthType: NONE
+        Cors:
+          AllowOrigins:
+          - Ref: ClientOrigin
+          AllowMethods:
+          - '*'
+          AllowHeaders:
+          - '*'
+    Metadata:
+      SamResourceId: ApiFunction
+Outputs:
+  DynamoDBTableName:
+    Value:
+      Ref: PersistenceTable
+  PersistencePolicyArn:
+    Value:
+      Ref: PersistenceAccessPolicy
+  ApiFunctionUrl:
+    Value:
+      Fn::GetAtt:
+      - ApiFunctionUrl
+      - FunctionUrl

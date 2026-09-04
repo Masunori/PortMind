@@ -170,7 +170,8 @@ export default function SourceControls({
                         : "border-slate-700 bg-slate-900 text-slate-300"
                 }`}
             >
-                Automatic collection is globally {scheduling.enabled ? "on" : "off"}.
+                Automatic collection is globally{" "}
+                {scheduling.enabled ? "on" : "off"}.
                 {!scheduling.enabled &&
                     " Per-scraper schedules are saved but will not run; Collect now remains available."}
             </div>
@@ -355,8 +356,12 @@ export default function SourceControls({
                                 </p>
                                 {source.type === "WEBSITE" && (
                                     <p className="mt-1 text-xs text-slate-400">
-                                        Schedule: {source.schedule_enabled ? "enabled" : "off"}
-                                        {source.schedule_enabled && !scheduling.enabled
+                                        Schedule:{" "}
+                                        {source.schedule_enabled
+                                            ? "enabled"
+                                            : "off"}
+                                        {source.schedule_enabled &&
+                                        !scheduling.enabled
                                             ? " (global scheduler off)"
                                             : ""}
                                         {source.next_run_at
@@ -611,7 +616,9 @@ export default function SourceControls({
                                             <input
                                                 name="schedule_enabled"
                                                 type="checkbox"
-                                                defaultChecked={source.schedule_enabled}
+                                                defaultChecked={
+                                                    source.schedule_enabled
+                                                }
                                             />{" "}
                                             Schedule automatic collection
                                         </label>

@@ -3,7 +3,8 @@
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/health` | Process health |
-| `GET` | `/health/db` | Platform PostgreSQL health |
+| `GET` | `/health/storage` | Selected persistence backend and health |
+| `GET` | `/health/db` | Deprecated PostgreSQL-specific diagnostic |
 | `GET` | `/health/client` | Sanitized client identity and versions |
 | `GET/POST` | `/api/sources` | Platform source management |
 | `GET` | `/api/sources/scheduling/status` | Global automatic-collection status |

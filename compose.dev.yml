@@ -1,4 +1,11 @@
 services:
+  dynamodb-local:
+    image: amazon/dynamodb-local:2.6.1
+    command: ["-jar", "DynamoDBLocal.jar", "-inMemory", "-sharedDb"]
+    ports:
+      - "8001:8000"
+    profiles: ["dynamodb"]
+
   client:
     build:
       context: ./client
@@ -22,6 +29,10 @@ services:
       context: ./server
       dockerfile: Dockerfile.dev
     environment:
+      PERSISTENCE_BACKEND: ${PERSISTENCE_BACKEND:-postgres}
+      DYNAMODB_TABLE_NAME: ${DYNAMODB_TABLE_NAME:-psa-local}
+      DYNAMODB_ENDPOINT_URL: ${DYNAMODB_ENDPOINT_URL:-http://dynamodb-local:8000}
+      AWS_REGION: ${AWS_REGION:-ap-southeast-1}
       DATABASE_URL: postgresql+psycopg://psa:psa@database:5432/psa
       CLIENT_ORIGIN: http://localhost:3000
       CLIENT_GATEWAY_URL: ${CLIENT_GATEWAY_URL:?Set CLIENT_GATEWAY_URL to the demo client integration API}

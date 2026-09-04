@@ -1,5 +1,11 @@
 # Architecture
 
+Application services depend on storage-neutral repository protocols. The composition
+root explicitly selects PostgreSQL or DynamoDB with `PERSISTENCE_BACKEND`; persistence
+failures never trigger fallback or dual writes. DynamoDB uses one on-demand table, two
+sparse indexes, explicit reverse references, and bounded conditional transactions.
+`/health/storage` probes whichever adapter was selected.
+
 AEGIS is a platform around an authoritative, separately deployed operational client.
 It owns evidence and review workflows, but it does not own the client's network,
 shipments, inventory, entity registry, simulation rules, or calculated results.

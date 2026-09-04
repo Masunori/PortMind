@@ -68,6 +68,19 @@ converted through decimal strings to `Decimal`; sets are stored as ordered lists
 order is observable. Empty values are normalized consistently. Continuation tokens
 are URL-safe base64 JSON and are validated before use.
 
+## Executable schema and local lifecycle
+
+`server/app/repositories/dynamodb/schema.py` is the canonical create-table definition.
+It creates string `PK`/`SK` keys, `GSI1` and `GSI2` with string partition/sort keys and
+`ALL` projections, and `PAY_PER_REQUEST` billing. After creation becomes active, the
+lifecycle helper enables DynamoDB TTL on `ttl`. Tests create a UUID-suffixed table and
+always delete it in teardown, so parallel workers never share state.
+
+The opt-in integration test accepts only loopback endpoints or the Compose service name
+`dynamodb-local`; it rejects AWS and arbitrary remote hosts before constructing an SDK
+resource. Its credentials are inert literals scoped to the local emulator and it never
+loads a developer AWS profile.
+
 ## Concurrency and failure semantics
 
 Every mutable aggregate has `version`. Updates use `version = :expected` and increment
@@ -80,3 +93,24 @@ PostgreSQL fallback.
 
 On-demand capacity has no idle throughput charge. The SAM template should additionally
 set conservative table/GSI maximum throughput and alarms to contain accidental usage.
+
+## Implemented item layouts
+
+Adapters use explicit reverse and lookup items in addition to the aggregate rows:
+
+| Purpose | PK | SK |
+| --- | --- | --- |
+| Source deletion protection | `SOURCE_REF#source-id` | `EVIDENCE#evidence-id` |
+| Canonical hash lock | `HASH#sha256` | `META` |
+| Duplicate protection | `DUP_REF#canonical-id` | `EVIDENCE#duplicate-id` |
+| Evidence signal history | `EVIDENCE_SIGNAL#evidence-id` | `SIGNAL#signal-id` |
+| Strong version lookup | `SIGNAL_VERSION#version-id` | `META` |
+| Relationship lookup | `VERSION_REL#version-id` | `relationship-id` |
+
+Accepted mapped versions use sparse `GSI1PK=RISK#context-version` keys. Planning
+snapshots use deterministic 60-KiB `SECTION#SNAPSHOT#000000` children and a conditional
+replacement transaction; snapshots above 90 chunks are rejected before writing.
+
+Continuation tokens contain format version `1`, query identity, exclusive-start key,
+and a canonical SHA-256 integrity digest. They are capped at 16 KiB, so malformed,
+modified, and cross-query tokens fail with a storage-neutral validation error.

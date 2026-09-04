@@ -1,0 +1,308 @@
+"""Bedrock Converse provider, schema, error, and factory tests."""
+
+import asyncio
+import json
+import os
+from datetime import datetime, timezone
+
+import pytest
+from botocore.exceptions import BotoCoreError, ClientError, ReadTimeoutError
+
+from app.integrations.bedrock import (
+    BedrockAPIError, BedrockFilterProvider, BedrockHypothesisProvider, BedrockInterpreterProvider,
+    BedrockPlannerPanelProvider, BedrockPlannerProvider, BedrockRateLimitError,
+    BedrockRiskProvider, BedrockSchemaError,
+)
+from app.integrations.contracts import (
+    DisruptionContract, Evidence, EvidenceKind, FilterRequest, GenerationEntity,
+    HypothesisGenerationRequest, InterpretationRequest, PlannerRequest,
+    ProcessingStatus, RiskGenerationRequest, SignalClass,
+)
+from app.integrations.factory import (
+    get_hypothesis_provider, get_planner_provider, get_provider_bundle, get_risk_provider,
+)
+
+
+def run(awaitable):
+    return asyncio.run(awaitable)
+
+
+class FakeBedrockClient:
+    def __init__(self, *payloads):
+        self.payloads = list(payloads)
+        self.calls = []
+
+    def converse(self, **request):
+        self.calls.append(request)
+        payload = self.payloads.pop(0)
+        if isinstance(payload, Exception):
+            raise payload
+        return {"output": {"message": {"role": "assistant", "content": [
+            {"text": payload if isinstance(payload, str) else json.dumps(payload)}
+        ]}}, "ResponseMetadata": {"RequestId": "bedrock-request-1"}}
+
+
+def evidence() -> Evidence:
+    return Evidence(id="ev-1", source_id="source-1", kind=EvidenceKind.UPLOAD,
+        title="Port report", media_type="text/plain",
+        content="Typhoon may close Hai Phong port", content_hash="a" * 64,
+        collected_at=datetime(2026, 8, 29, tzinfo=timezone.utc),
+        processing_status=ProcessingStatus.COMPLETE)
+
+
+def filter_payload():
+    return {"decision": "ACCEPT", "relevance_probability": 0.91,
+        "reason_codes": ["port-disruption"], "rationale": "Relevant forecast.",
+        "entity_hints": ["Hai Phong"]}
+
+
+def interpreter_payload():
+    return {"classification": "FORECAST", "signal_type": "PORT_CAPACITY_CHANGE",
+        "entity_mentions": ["Hai Phong"], "target_entity_mentions": ["Hai Phong"],
+        "temporal_window": {"starts_at": "2026-08-30T00:00:00Z",
+                            "ends_at": "2026-08-31T00:00:00Z"},
+        "occurrence_probability": 0.8, "severity": 0.7,
+        "extraction_confidence": 0.9}
+
+
+def test_filter_uses_converse_structured_output_and_trusted_metadata():
+    client = FakeBedrockClient(filter_payload())
+    result = run(BedrockFilterProvider(model="model-1", region="ap-southeast-1",
+        client=client, system_prompt="Filter safely.").assess(FilterRequest(
+            evidence=evidence(), model_context={"ports": ["Hai Phong"]},
+            context_version="context-v1")))
+
+    assert result.decision == "ACCEPT"
+    assert result.metadata.provider == "bedrock"
+    assert result.metadata.model == "model-1"
+    assert result.metadata.request_id == "bedrock-request-1"
+    request = client.calls[0]
+    assert request["modelId"] == "model-1"
+    assert request["system"] == [{"text": "Filter safely."}]
+    assert request["outputConfig"]["textFormat"]["type"] == "json_schema"
+    schema = json.loads(request["outputConfig"]["textFormat"]["structure"]
+                        ["jsonSchema"]["schema"])
+    assert "metadata" not in schema["properties"]
+    assert request["inferenceConfig"] == {"temperature": 0, "maxTokens": 4096}
+
+
+def test_interpreter_preserves_grounding_boundary():
+    client = FakeBedrockClient(interpreter_payload())
+    request = InterpretationRequest(evidence=evidence(), context_version="context-v1",
+        entity_resolution_capabilities={"entity_types": {"PORT": {}}},
+        disruption_contracts=[{"type": "PORT_CAPACITY_CHANGE",
+            "target_types": ["PORT"], "payload_schema": {"type": "object"}}])
+    result = run(BedrockInterpreterProvider(model="model-1", client=client)
+                 .interpret(request))
+    assert result.classification == SignalClass.FORECAST
+    assert result.supporting_evidence_ids == ["ev-1"]
+    assert result.target_entity_mentions == ["Hai Phong"]
+    assert result.metadata.prompt_version == "interpreter-v2"
+
+
+def test_hypothesis_risk_and_planner_providers_use_bedrock():
+    hypothesis_client = FakeBedrockClient({"hypotheses": [{"id": "hyp-1",
+        "name": "Port slowdown", "signal_type": "PORT_CAPACITY_CHANGE",
+        "payload": {"target_ids": ["port-1"]}, "occurrence_probability": 0.4,
+        "rationale": "Plausible risk."}]})
+    contract = DisruptionContract(type="PORT_CAPACITY_CHANGE", target_types=["PORT"],
+        payload_schema={"type": "object"}, schema_hash="a" * 64)
+    hypothesis = run(BedrockHypothesisProvider(model="model-1", client=hypothesis_client)
+        .propose_hypotheses(HypothesisGenerationRequest(prompt="lead-time risks",
+            context_summary={}, context_version="context-v1",
+            entity_scope=[GenerationEntity(entity_id="port-1", entity_type="PORT",
+                display_name="Port One")], generation_limit=1,
+            disruption_contracts=[contract])))
+    assert hypothesis.hypotheses[0].metadata.provider == "bedrock"
+
+    risk_client = FakeBedrockClient({"proposals": [{"proposal_id": "risk-1",
+        "name": "Port risk", "description": "Capacity scenario",
+        "selected_signal_version_ids": [], "hypothetical_disruptions": [{
+            "type": "PORT_CAPACITY_CHANGE",
+            "payload_json": json.dumps({"target_ids": ["port-1"]})}],
+        "occurrence_probability": 0.7, "assumptions": [],
+        "rationale": "Capacity may fall."}], "warnings": []})
+    risk = run(BedrockRiskProvider(model="model-1", client=risk_client)
+        .propose_scenarios(RiskGenerationRequest(context_summary={},
+            context_version="context-v1", state_version="state-v1",
+            disruption_contracts=[contract], generation_limit=1)))
+    assert risk.proposals[0].metadata.provider == "bedrock"
+
+    planner_client = FakeBedrockClient({"proposals": [{"proposal_id": "plan-1",
+        "name": "Reroute", "interventions": [{"type": "REROUTE",
+            "payload_json": json.dumps({"target_ids": ["port-1"]})}],
+        "rationale": "Protect continuity.", "assumptions": [],
+        "expected_qualitative_effects": []}], "warnings": []})
+    plan = run(BedrockPlannerProvider(model="model-1", client=planner_client)
+        .propose_plans(PlannerRequest(planning_cycle_id="cycle-1",
+            scenario_id="scenario-1", context_version="context-v1", state_version="state-v1",
+            disruptions=[], baseline_run_id="run-1", baseline_results={},
+            intervention_contracts=[{"type": "REROUTE", "target_types": ["PORT"],
+                "payload_schema": {"type": "object"}, "schema_hash": "b" * 64}],
+            proposal_limit=1, known_entity_ids=["port-1"])))
+    assert plan.proposals[0].metadata.provider == "bedrock"
+
+
+def test_invalid_response_gets_bounded_correction_attempt():
+    client = FakeBedrockClient("not json", filter_payload())
+    result = run(BedrockFilterProvider(model="model-1", max_attempts=2, client=client)
+                 .assess(FilterRequest(evidence=evidence(), model_context={},
+                                       context_version="context-v1")))
+    assert result.decision == "ACCEPT"
+    assert "failed local schema validation" in client.calls[1]["messages"][0]["content"][0]["text"]
+
+
+def test_schema_failure_stops_at_attempt_limit():
+    client = FakeBedrockClient("not json", "still not json")
+    with pytest.raises(BedrockSchemaError, match="after 2 attempts"):
+        run(BedrockFilterProvider(model="model-1", max_attempts=2, client=client)
+            .assess(FilterRequest(evidence=evidence(), model_context={},
+                                  context_version="context-v1")))
+
+
+def test_throttling_is_sanitized_and_typed():
+    error = ClientError({"Error": {"Code": "ThrottlingException",
+        "Message": "request quota exceeded"},
+        "ResponseMetadata": {"HTTPStatusCode": 429}}, "Converse")
+    client = FakeBedrockClient(error)
+    with pytest.raises(BedrockRateLimitError, match="quota exhausted") as captured:
+        run(BedrockFilterProvider(model="model-1", client=client)
+            .assess(FilterRequest(evidence=evidence(), model_context={},
+                                  context_version="context-v1")))
+    assert captured.value.status_code == 429
+    assert captured.value.retryable is True
+
+
+@pytest.mark.parametrize("error, status, retryable", [
+    (ClientError({"Error": {"Code": "AccessDeniedException", "Message": "secret request"},
+                  "ResponseMetadata": {"HTTPStatusCode": 403}}, "Converse"), 403, False),
+    (ReadTimeoutError(endpoint_url="https://bedrock.invalid"), 503, True),
+    (BotoCoreError(), 502, False),
+])
+def test_transport_failures_are_typed_without_reflecting_provider_details(
+    error, status, retryable,
+):
+    client = FakeBedrockClient(error)
+    with pytest.raises(BedrockAPIError) as captured:
+        run(BedrockFilterProvider(model="model-1", client=client)
+            .assess(FilterRequest(evidence=evidence(), model_context={},
+                                  context_version="context-v1")))
+    assert captured.value.status_code == status
+    assert captured.value.retryable is retryable
+    assert "secret request" not in str(captured.value)
+
+
+def test_missing_response_blocks_use_the_bounded_schema_repair_path():
+    class MissingBlockClient:
+        def __init__(self):
+            self.calls = 0
+
+        def converse(self, **request):
+            self.calls += 1
+            return {"output": {"message": {"content": []}}}
+
+    client = MissingBlockClient()
+    with pytest.raises(BedrockSchemaError, match="after 2 attempts"):
+        run(BedrockFilterProvider(model="model-1", max_attempts=2, client=client)
+            .assess(FilterRequest(evidence=evidence(), model_context={},
+                                  context_version="context-v1")))
+    assert client.calls == 2
+
+
+def test_semantic_validation_failure_can_be_corrected():
+    invalid = interpreter_payload() | {"signal_type": "INVENTED"}
+    client = FakeBedrockClient(invalid, interpreter_payload())
+    request = InterpretationRequest(evidence=evidence(), context_version="context-v1",
+        entity_resolution_capabilities={}, disruption_contracts=[{
+            "type": "PORT_CAPACITY_CHANGE", "target_types": ["PORT"],
+            "payload_schema": {"type": "object"}}])
+    result = run(BedrockInterpreterProvider(model="model-1", max_attempts=2,
+                                             client=client).interpret(request))
+    assert result.signal_type == "PORT_CAPACITY_CHANGE"
+    assert len(client.calls) == 2
+
+
+def test_factories_select_bedrock_for_every_model_role(monkeypatch):
+    monkeypatch.setenv("BEDROCK_MODEL_ID", "profile-1")
+    monkeypatch.setenv("BEDROCK_REGION", "ap-southeast-1")
+    monkeypatch.setenv("FILTER_PROVIDER", "bedrock")
+    monkeypatch.setenv("INTERPRETER_PROVIDER", "bedrock")
+    monkeypatch.setenv("RISK_PROVIDER", "bedrock")
+    monkeypatch.setenv("PLANNER_PROVIDER", "bedrock")
+    monkeypatch.setenv("HYPOTHESIS_PROVIDER", "bedrock")
+
+    bundle = get_provider_bundle()
+    assert isinstance(bundle.filter, BedrockFilterProvider)
+    assert isinstance(bundle.interpreter, BedrockInterpreterProvider)
+    assert isinstance(get_risk_provider(), BedrockRiskProvider)
+    assert isinstance(get_planner_provider(), BedrockPlannerProvider)
+    assert isinstance(get_planner_provider("panel", 2), BedrockPlannerPanelProvider)
+    assert isinstance(get_hypothesis_provider(), BedrockHypothesisProvider)
+    assert bundle.filter._model == "profile-1"
+    assert bundle.filter._sdk_max_attempts == 2
+
+
+def test_bedrock_planner_panel_labels_role_specific_proposals():
+    payload = {"proposals": [{"proposal_id": "plan-1", "name": "Reroute",
+        "interventions": [{"type": "REROUTE",
+            "payload_json": json.dumps({"target_ids": ["port-1"]})}],
+        "rationale": "Role-specific rationale.", "assumptions": [],
+        "expected_qualitative_effects": []}], "warnings": []}
+    client = FakeBedrockClient(payload, payload)
+    provider = BedrockPlannerPanelProvider(model="model-1", client=client,
+        agent_prompts=["Base planner prompt.", "Base planner prompt."], agent_count=2)
+    result = run(provider.propose_plans(PlannerRequest(planning_cycle_id="cycle-1",
+        scenario_id="scenario-1", context_version="context-v1", state_version="state-v1",
+        disruptions=[], baseline_run_id="run-1", baseline_results={},
+        intervention_contracts=[{"type": "REROUTE", "target_types": ["PORT"],
+            "payload_schema": {"type": "object"}, "schema_hash": "b" * 64}],
+        proposal_limit=2, known_entity_ids=["port-1"])))
+
+    assert [item.proposal_id for item in result.proposals] == [
+        "continuity-plan-1", "cost-plan-1"]
+    assert all(item.metadata.provider == "bedrock-panel" for item in result.proposals)
+    assert "Panel role: continuity." in client.calls[0]["system"][0]["text"]
+    assert "Panel role: cost." in client.calls[1]["system"][0]["text"]
+
+
+def test_bedrock_planner_panel_keeps_successful_partial_results():
+    payload = {"proposals": [{"proposal_id": "plan-1", "name": "Reroute",
+        "interventions": [{"type": "REROUTE", "payload_json": "{}"}],
+        "rationale": "Role-specific rationale.", "assumptions": [],
+        "expected_qualitative_effects": []}], "warnings": []}
+    failure = ClientError({"Error": {"Code": "AccessDeniedException"},
+                           "ResponseMetadata": {"HTTPStatusCode": 403}}, "Converse")
+    client = FakeBedrockClient(payload, failure)
+    provider = BedrockPlannerPanelProvider(model="model-1", client=client, agent_count=2)
+    result = run(provider.propose_plans(PlannerRequest(planning_cycle_id="cycle-1",
+        scenario_id="scenario-1", context_version="context-v1", state_version="state-v1",
+        disruptions=[], baseline_run_id="run-1", baseline_results={},
+        intervention_contracts=[{"type": "REROUTE", "target_types": ["PORT"],
+            "payload_schema": {"type": "object"}, "schema_hash": "b" * 64}],
+        proposal_limit=2, known_entity_ids=["port-1"])))
+    assert [item.proposal_id for item in result.proposals] == ["continuity-plan-1"]
+    assert result.warnings == ["cost: provider unavailable"]
+
+
+def test_bedrock_configuration_requires_model_id():
+    with pytest.raises(ValueError, match="BEDROCK_MODEL_ID"):
+        BedrockFilterProvider(model="")
+
+
+@pytest.mark.skipif(
+    not (os.getenv("BEDROCK_LIVE_TEST") == "1" and os.getenv("BEDROCK_MODEL_ID")),
+    reason="set BEDROCK_LIVE_TEST=1 and BEDROCK_MODEL_ID for the bounded AWS smoke test",
+)
+def test_live_bedrock_filter_smoke():
+    """Opt-in live call capped at one attempt and 256 output tokens."""
+
+    result = run(BedrockFilterProvider(
+        model=os.environ["BEDROCK_MODEL_ID"],
+        region=os.getenv("BEDROCK_REGION") or os.getenv("AWS_REGION"),
+        max_attempts=1,
+        sdk_max_attempts=1,
+        timeout_seconds=20,
+        max_tokens=256,
+    ).assess(FilterRequest(evidence=evidence(), model_context={},
+                           context_version="live-smoke-v1")))
+    assert result.metadata.provider == "bedrock"

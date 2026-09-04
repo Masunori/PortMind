@@ -313,46 +313,54 @@ function CycleCard({ initialCycle }: { initialCycle: PlanningCycle }) {
         initialCycle.selected_disruption_ids,
     );
 
-    const mutate = useCallback(async function mutate(
-        action: string,
-        path: string,
-        confirmation?: string,
-        body?: unknown,
-    ): Promise<PlanningCycle | null> {
-        if (confirmation && !window.confirm(confirmation)) return null;
-        setBusy(action);
-        setError(null);
-        setNotice(null);
-        try {
-            const response = await fetch(`${apiUrl}${path}`, {
-                method: "POST",
-                headers:
-                    body === undefined
-                        ? undefined
-                        : { "Content-Type": "application/json" },
-                body: body === undefined ? undefined : JSON.stringify(body),
-            });
-            const payload = (await response.json().catch(() => null)) as
-                | PlanningCycle
-                | { detail?: string }
-                | null;
-            if (!response.ok)
-                throw new Error(apiErrorMessage(payload, `Request failed (${response.status})`));
-            const updated = payload as PlanningCycle;
-            setCycle(updated);
-            setSelection(updated.selected_disruption_ids);
-            setNotice("Workflow updated.");
-            router.refresh();
-            return updated;
-        } catch (caught) {
-            setError(
-                caught instanceof Error ? caught.message : "Request failed",
-            );
-            return null;
-        } finally {
-            setBusy(null);
-        }
-    }, [router]);
+    const mutate = useCallback(
+        async function mutate(
+            action: string,
+            path: string,
+            confirmation?: string,
+            body?: unknown,
+        ): Promise<PlanningCycle | null> {
+            if (confirmation && !window.confirm(confirmation)) return null;
+            setBusy(action);
+            setError(null);
+            setNotice(null);
+            try {
+                const response = await fetch(`${apiUrl}${path}`, {
+                    method: "POST",
+                    headers:
+                        body === undefined
+                            ? undefined
+                            : { "Content-Type": "application/json" },
+                    body: body === undefined ? undefined : JSON.stringify(body),
+                });
+                const payload = (await response.json().catch(() => null)) as
+                    | PlanningCycle
+                    | { detail?: string }
+                    | null;
+                if (!response.ok)
+                    throw new Error(
+                        apiErrorMessage(
+                            payload,
+                            `Request failed (${response.status})`,
+                        ),
+                    );
+                const updated = payload as PlanningCycle;
+                setCycle(updated);
+                setSelection(updated.selected_disruption_ids);
+                setNotice("Workflow updated.");
+                router.refresh();
+                return updated;
+            } catch (caught) {
+                setError(
+                    caught instanceof Error ? caught.message : "Request failed",
+                );
+                return null;
+            } finally {
+                setBusy(null);
+            }
+        },
+        [router],
+    );
 
     async function runReviewedScenario() {
         const reviewed = await mutate(
@@ -432,32 +440,36 @@ function CycleCard({ initialCycle }: { initialCycle: PlanningCycle }) {
                     </button>
                 )}
             </div>
-            {cycle.baseline_run_id === null && <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="rounded-lg bg-slate-950 p-3">
-                    <p className="text-xs text-slate-500">Context version</p>
-                    <p className="mt-1 truncate font-mono text-xs text-sky-300">
-                        {cycle.scenario.context_version}
-                    </p>
+            {cycle.baseline_run_id === null && (
+                <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    <div className="rounded-lg bg-slate-950 p-3">
+                        <p className="text-xs text-slate-500">
+                            Context version
+                        </p>
+                        <p className="mt-1 truncate font-mono text-xs text-sky-300">
+                            {cycle.scenario.context_version}
+                        </p>
+                    </div>
+                    <div className="rounded-lg bg-slate-950 p-3">
+                        <p className="text-xs text-slate-500">State version</p>
+                        <p className="mt-1 truncate font-mono text-xs text-sky-300">
+                            {cycle.scenario.state_version}
+                        </p>
+                    </div>
+                    <div className="rounded-lg bg-slate-950 p-3">
+                        <p className="text-xs text-slate-500">Baseline run</p>
+                        <p className="mt-1 truncate font-mono text-xs text-slate-300">
+                            {cycle.baseline_run_id ?? "Not submitted"}
+                        </p>
+                    </div>
+                    <div className="rounded-lg bg-slate-950 p-3">
+                        <p className="text-xs text-slate-500">Ranking policy</p>
+                        <p className="mt-1 font-mono text-xs text-slate-300">
+                            {cycle.ranking_policy_version}
+                        </p>
+                    </div>
                 </div>
-                <div className="rounded-lg bg-slate-950 p-3">
-                    <p className="text-xs text-slate-500">State version</p>
-                    <p className="mt-1 truncate font-mono text-xs text-sky-300">
-                        {cycle.scenario.state_version}
-                    </p>
-                </div>
-                <div className="rounded-lg bg-slate-950 p-3">
-                    <p className="text-xs text-slate-500">Baseline run</p>
-                    <p className="mt-1 truncate font-mono text-xs text-slate-300">
-                        {cycle.baseline_run_id ?? "Not submitted"}
-                    </p>
-                </div>
-                <div className="rounded-lg bg-slate-950 p-3">
-                    <p className="text-xs text-slate-500">Ranking policy</p>
-                    <p className="mt-1 font-mono text-xs text-slate-300">
-                        {cycle.ranking_policy_version}
-                    </p>
-                </div>
-            </div>}
+            )}
             {error && (
                 <div
                     role="alert"
@@ -616,7 +628,8 @@ function CycleCard({ initialCycle }: { initialCycle: PlanningCycle }) {
                     label="Frozen scenario and disruption provenance"
                     value={{
                         complete_scenario: cycle.scenario.disruptions,
-                        active_simulator_inputs: cycle.scenario.active_disruptions,
+                        active_simulator_inputs:
+                            cycle.scenario.active_disruptions,
                         signal_version_ids: cycle.scenario.signal_version_ids,
                         provenance: cycle.scenario.provenance,
                     }}
@@ -638,7 +651,9 @@ function CycleCard({ initialCycle }: { initialCycle: PlanningCycle }) {
                             </p>
                         </div>
                         {workflowPending && (
-                            <span className="text-xs text-sky-300">Simulating and ranking automatically…</span>
+                            <span className="text-xs text-sky-300">
+                                Simulating and ranking automatically…
+                            </span>
                         )}
                     </div>
                     {orderedPlans(cycle.plans).map((plan) => (
@@ -668,7 +683,9 @@ export default function PlanningConsole({
 }) {
     const router = useRouter();
     const [creating, setCreating] = useState(false);
-    const [plannerMode, setPlannerMode] = useState<"single" | "panel">("single");
+    const [plannerMode, setPlannerMode] = useState<"single" | "panel">(
+        "single",
+    );
     const [generatingHypotheses, setGeneratingHypotheses] = useState(false);
     const [hypothesesLoaded, setHypothesesLoaded] = useState(false);
     const [hypotheses, setHypotheses] = useState<LocalHypothesis[]>([]);
@@ -732,18 +749,33 @@ export default function PlanningConsole({
                 | { detail?: string }
                 | null;
             if (!response.ok || !Array.isArray(payload))
-                throw new Error(apiErrorMessage(payload, `Entity search failed (${response.status})`));
+                throw new Error(
+                    apiErrorMessage(
+                        payload,
+                        `Entity search failed (${response.status})`,
+                    ),
+                );
             setEntityResults(payload);
         } catch (caught) {
-            setError(caught instanceof Error ? caught.message : "Entity search failed");
+            setError(
+                caught instanceof Error
+                    ? caught.message
+                    : "Entity search failed",
+            );
         }
     }
 
     function addEntity(item: GenerationEntity) {
-        setEntityScope((current) => [
-            ...current.filter((entity) => entity.entity_id !== item.entity_id),
-            item,
-        ].sort((left, right) => left.entity_id.localeCompare(right.entity_id)));
+        setEntityScope((current) =>
+            [
+                ...current.filter(
+                    (entity) => entity.entity_id !== item.entity_id,
+                ),
+                item,
+            ].sort((left, right) =>
+                left.entity_id.localeCompare(right.entity_id),
+            ),
+        );
     }
 
     async function generateHypotheses(event: FormEvent<HTMLFormElement>) {
@@ -771,8 +803,12 @@ export default function PlanningConsole({
                 detail?: string;
             } | null;
             if (!response.ok)
-                throw new Error(apiErrorMessage(payload,
-                    `Hypothesis generation failed (${response.status})`));
+                throw new Error(
+                    apiErrorMessage(
+                        payload,
+                        `Hypothesis generation failed (${response.status})`,
+                    ),
+                );
             setHypotheses((current) =>
                 mergeHypotheses(current, payload?.hypotheses ?? []),
             );
@@ -813,7 +849,9 @@ export default function PlanningConsole({
                     planning_ends_at: planningEndsAt,
                     generation_limit: Number(form.get("generation_limit") ?? 5),
                     planner_mode: String(form.get("planner_mode") ?? "single"),
-                    panel_agent_count: Number(form.get("panel_agent_count") ?? 3),
+                    panel_agent_count: Number(
+                        form.get("panel_agent_count") ?? 3,
+                    ),
                     confirmed_hypotheses: hypotheses
                         .filter((item) => item.confirmed)
                         .map((item) => ({
@@ -839,8 +877,12 @@ export default function PlanningConsole({
                 detail?: string;
             } | null;
             if (!response.ok)
-                throw new Error(apiErrorMessage(payload,
-                    `Risk generation failed (${response.status})`));
+                throw new Error(
+                    apiErrorMessage(
+                        payload,
+                        `Risk generation failed (${response.status})`,
+                    ),
+                );
             if (payload?.id) setSelectedCycleId(payload.id);
             router.refresh();
         } catch (caught) {
@@ -872,33 +914,63 @@ export default function PlanningConsole({
                     them for a scenario. They are not written to the signal
                     database.
                 </p>
-                <form onSubmit={searchEntities} className="mt-4 flex flex-wrap gap-2">
-                    <input required name="entity_query" placeholder="Search client entities"
-                        className={`${inputClass} min-w-72 flex-1`} />
-                    <button disabled={!connected}
-                        className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-semibold disabled:opacity-40">
+                <form
+                    onSubmit={searchEntities}
+                    className="mt-4 flex flex-wrap gap-2"
+                >
+                    <input
+                        required
+                        name="entity_query"
+                        placeholder="Search client entities"
+                        className={`${inputClass} min-w-72 flex-1`}
+                    />
+                    <button
+                        disabled={!connected}
+                        className="rounded-lg bg-slate-700 px-4 py-2 text-sm font-semibold disabled:opacity-40"
+                    >
                         Search entities
                     </button>
                 </form>
                 {entityResults.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-2">
                         {entityResults.map((item) => (
-                            <button key={item.entity_id} type="button" onClick={() => addEntity(item)}
-                                className="rounded-full border border-violet-800 px-3 py-1 text-xs text-violet-200">
+                            <button
+                                key={item.entity_id}
+                                type="button"
+                                onClick={() => addEntity(item)}
+                                className="rounded-full border border-violet-800 px-3 py-1 text-xs text-violet-200"
+                            >
                                 Add {item.display_name} ({item.entity_type})
                             </button>
                         ))}
                     </div>
                 )}
-                <div className="mt-3 flex flex-wrap gap-2" aria-label="Included entities">
+                <div
+                    className="mt-3 flex flex-wrap gap-2"
+                    aria-label="Included entities"
+                >
                     {entityScope.map((item) => (
-                        <span key={item.entity_id}
-                            className="rounded-full bg-violet-950 px-3 py-1 text-xs text-violet-200">
+                        <span
+                            key={item.entity_id}
+                            className="rounded-full bg-violet-950 px-3 py-1 text-xs text-violet-200"
+                        >
                             {item.display_name} · {item.entity_type}
-                            <button type="button" aria-label={`Remove ${item.display_name}`}
-                                onClick={() => setEntityScope((current) => current.filter(
-                                    (entity) => entity.entity_id !== item.entity_id))}
-                                className="ml-2 text-red-300">×</button>
+                            <button
+                                type="button"
+                                aria-label={`Remove ${item.display_name}`}
+                                onClick={() =>
+                                    setEntityScope((current) =>
+                                        current.filter(
+                                            (entity) =>
+                                                entity.entity_id !==
+                                                item.entity_id,
+                                        ),
+                                    )
+                                }
+                                className="ml-2 text-red-300"
+                            >
+                                ×
+                            </button>
                         </span>
                     ))}
                 </div>
@@ -997,12 +1069,14 @@ export default function PlanningConsole({
                     <h2 className="font-semibold">Generate risk scenarios</h2>
                     <p className="mt-1 max-w-3xl text-sm text-slate-400">
                         The risk agent groups compatible observed, forecast, and
-                        confirmed hypothetical disruptions. Generation creates
-                        a review draft and does not invoke simulation.
+                        confirmed hypothetical disruptions. Generation creates a
+                        review draft and does not invoke simulation.
                     </p>
                 </div>
                 <form onSubmit={create} className="mt-5 grid gap-4">
-                    <div className={`grid items-start gap-3 sm:grid-cols-2 ${plannerMode === "panel" ? "xl:grid-cols-[minmax(10rem,1fr)_minmax(10rem,1fr)_8rem_minmax(14rem,1.35fr)_minmax(10rem,0.8fr)]" : "xl:grid-cols-[minmax(10rem,1fr)_minmax(10rem,1fr)_8rem_minmax(14rem,1.35fr)]"}`}>
+                    <div
+                        className={`grid items-start gap-3 sm:grid-cols-2 ${plannerMode === "panel" ? "xl:grid-cols-[minmax(10rem,1fr)_minmax(10rem,1fr)_8rem_minmax(14rem,1.35fr)_minmax(10rem,0.8fr)]" : "xl:grid-cols-[minmax(10rem,1fr)_minmax(10rem,1fr)_8rem_minmax(14rem,1.35fr)]"}`}
+                    >
                         <label className="grid gap-1 text-xs text-slate-400">
                             Horizon start
                             <input
@@ -1039,15 +1113,25 @@ export default function PlanningConsole({
                             <select
                                 name="planner_mode"
                                 value={plannerMode}
-                                onChange={(event) => setPlannerMode(event.target.value as "single" | "panel")}
+                                onChange={(event) =>
+                                    setPlannerMode(
+                                        event.target.value as
+                                            | "single"
+                                            | "panel",
+                                    )
+                                }
                                 aria-describedby="planner-mode-help"
                                 className={`${inputClass} w-full`}
                             >
                                 <option value="single">Single planner</option>
                                 <option value="panel">Panel of planners</option>
                             </select>
-                            <span id="planner-mode-help" className="text-[11px] leading-4 text-slate-500">
-                                A panel returns separate continuity, cost, and resilience proposals.
+                            <span
+                                id="planner-mode-help"
+                                className="text-[11px] leading-4 text-slate-500"
+                            >
+                                A panel returns separate continuity, cost, and
+                                resilience proposals.
                             </span>
                         </label>
                         {plannerMode === "panel" && (
@@ -1060,12 +1144,14 @@ export default function PlanningConsole({
                                 >
                                     {[1, 2, 3, 4, 5].map((count) => (
                                         <option key={count} value={count}>
-                                            {count} {count === 1 ? "agent" : "agents"}
+                                            {count}{" "}
+                                            {count === 1 ? "agent" : "agents"}
                                         </option>
                                     ))}
                                 </select>
                                 <span className="text-[11px] leading-4 text-slate-500">
-                                    Uses panel prompts 1 through the selected count.
+                                    Uses panel prompts 1 through the selected
+                                    count.
                                 </span>
                             </label>
                         )}
@@ -1127,8 +1213,8 @@ export default function PlanningConsole({
                                 Planning cycles
                             </h2>
                             <p className="mt-1 text-sm text-slate-400">
-                                Select one cycle to review its simulation, plans,
-                                and decision history.
+                                Select one cycle to review its simulation,
+                                plans, and decision history.
                             </p>
                         </div>
                         <label className="grid w-full gap-1 text-xs text-slate-400 lg:hidden">
@@ -1142,7 +1228,8 @@ export default function PlanningConsole({
                             >
                                 {initialCycles.map((cycle) => (
                                     <option key={cycle.id} value={cycle.id}>
-                                        {cycle.scenario.name} — {humanize(cycle.status)}
+                                        {cycle.scenario.name} —{" "}
+                                        {humanize(cycle.status)}
                                     </option>
                                 ))}
                             </select>
@@ -1154,13 +1241,18 @@ export default function PlanningConsole({
                             className="sticky top-4 hidden max-h-[calc(100vh-2rem)] space-y-2 overflow-y-auto rounded-2xl border border-slate-800 bg-slate-900 p-3 lg:block"
                         >
                             {initialCycles.map((cycle) => {
-                                const selected = cycle.id === effectiveSelectedCycleId;
+                                const selected =
+                                    cycle.id === effectiveSelectedCycleId;
                                 return (
                                     <button
                                         key={cycle.id}
                                         type="button"
-                                        aria-current={selected ? "true" : undefined}
-                                        onClick={() => setSelectedCycleId(cycle.id)}
+                                        aria-current={
+                                            selected ? "true" : undefined
+                                        }
+                                        onClick={() =>
+                                            setSelectedCycleId(cycle.id)
+                                        }
                                         className={`w-full rounded-xl border p-3 text-left transition ${
                                             selected
                                                 ? "border-sky-700 bg-sky-950/60"
@@ -1171,15 +1263,21 @@ export default function PlanningConsole({
                                             <span className="line-clamp-2 text-sm font-medium text-slate-100">
                                                 {cycle.scenario.name}
                                             </span>
-                                            <StatusBadge status={cycle.status} />
+                                            <StatusBadge
+                                                status={cycle.status}
+                                            />
                                         </span>
                                         <span className="mt-2 block text-xs text-slate-400">
                                             {Math.round(
-                                                cycle.scenario.occurrence_probability * 100,
+                                                cycle.scenario
+                                                    .occurrence_probability *
+                                                    100,
                                             )}
-                                            % risk · {cycle.scenario.disruptions.length}{" "}
+                                            % risk ·{" "}
+                                            {cycle.scenario.disruptions.length}{" "}
                                             disruption
-                                            {cycle.scenario.disruptions.length === 1
+                                            {cycle.scenario.disruptions
+                                                .length === 1
                                                 ? ""
                                                 : "s"}
                                         </span>

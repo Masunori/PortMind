@@ -23,6 +23,8 @@
 | Configure or deploy the stack | [Operations](operations.md) |
 | Deploy the low-cost hackathon stack | [Serverless hackathon deployment roadmap](serverless-hackathon-deployment-roadmap.md) |
 | Implement DynamoDB persistence | [DynamoDB data model](dynamodb-data-model.md) |
+| Plan DynamoDB repository implementation | [DynamoDB implementation map](dynamodb-implementation-map.md) |
+| Review PostgreSQL repository compliance | [PostgreSQL repository-contract migration](persistence-migration.md) |
 | Review or smoke-test Bedrock | [Bedrock verification](bedrock-verification.md) |
 
 ## Suggested code-reading path
@@ -31,6 +33,8 @@
 server/app/main.py
 → server/app/api/<capability>.py
 → server/app/services/<capability>_service.py
+→ server/app/repositories/contracts.py
+→ server/app/repositories/postgres/<capability>.py
 → server/app/domain/ or server/app/integrations/contracts.py
 → server/app/models.py
 → server/tests/test_<capability>.py
