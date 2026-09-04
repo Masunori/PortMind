@@ -386,7 +386,7 @@ function CycleCard({ initialCycle }: { initialCycle: PlanningCycle }) {
                 "workflow-auto-advance",
                 `/api/planning/cycles/${cycle.id}/advance`,
             );
-        }, 1500);
+        }, 5000);
         return () => window.clearTimeout(timeout);
     }, [workflowPending, busy, cycle.id, mutate]);
     const disruptions = [
