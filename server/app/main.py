@@ -3,10 +3,11 @@
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import asyncio
+import logging
 import os
 from collections.abc import AsyncIterator
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from mangum import Mangum
 from sqlalchemy import text
@@ -27,6 +28,9 @@ from app.scheduler import build_scheduler, scheduling_enabled
 from app.database import engine
 from app.repositories import get_storage
 from app.repositories.errors import ConflictError, NotFoundError, UnavailableError, ValidationError
+
+
+logger = logging.getLogger(__name__)
 
 # Validate operator selection while assembling the application. This is intentionally
 # fail-closed; runtime storage errors never cause a backend switch.
@@ -64,8 +68,15 @@ async def persistence_validation(_request, error: ValidationError):
     return JSONResponse(status_code=422, content={"detail": str(error)})
 
 @app.exception_handler(UnavailableError)
-async def persistence_unavailable(_request, _error: UnavailableError):
+async def persistence_unavailable(request: Request, error: UnavailableError):
     from fastapi.responses import JSONResponse
+
+    logger.error(
+        "Persistence unavailable for %s %s",
+        request.method,
+        request.url.path,
+        exc_info=(type(error), error, error.__traceback__),
+    )
     return JSONResponse(status_code=503, content={"detail": "storage unavailable"})
 app.add_middleware(
     CORSMiddleware,

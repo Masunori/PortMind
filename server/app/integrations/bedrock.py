@@ -21,8 +21,42 @@ from app.integrations.model_provider import (
     PlannerProviderBehavior, RiskProviderBehavior,
 )
 
+
 OutputModel = TypeVar("OutputModel", bound=BaseModel)
 
+
+_UNSUPPORTED_OUTPUT_SCHEMA_KEYS = frozenset({
+    "default",
+    "maximum",
+    "maxItems",
+    "maxLength",
+    "minimum",
+    "multipleOf",
+    "minLength",
+})
+
+
+def _bedrock_output_schema(output_type: type[OutputModel]) -> dict[str, Any]:
+    """Remove constraints unsupported by Bedrock's structured-output subset.
+
+    The original Pydantic model remains authoritative and validates the response
+    after generation, so removing provider-side constraints does not weaken the
+    application boundary.
+    """
+
+    def normalize(value: Any) -> Any:
+        if isinstance(value, list):
+            return [normalize(item) for item in value]
+        if not isinstance(value, dict):
+            return value
+        return {
+            key: normalize(item)
+            for key, item in value.items()
+            if key not in _UNSUPPORTED_OUTPUT_SCHEMA_KEYS
+            and not (key == "additionalProperties" and item is True)
+        }
+
+    return normalize(output_type.model_json_schema())
 
 class BedrockSchemaError(ValueError):
     """Raised when Bedrock exhausts correction attempts for a provider contract."""
@@ -98,6 +132,9 @@ class _BedrockStructuredProvider:
         validate: Callable[[OutputModel], None] | None = None,
     ) -> tuple[OutputModel, str | None]:
         validation_error = ""
+        schema = _bedrock_output_schema(output_type)
+        schema_name = output_type.__name__.removeprefix("_").lower()
+        uses_tool_output = "amazon.nova-2-" in self._model
         for attempt in range(1, self._max_attempts + 1):
             attempt_prompt = prompt
             if validation_error:
@@ -109,26 +146,43 @@ class _BedrockStructuredProvider:
                 "modelId": self._model,
                 "messages": [{"role": "user", "content": [{"text": attempt_prompt}]}],
                 "inferenceConfig": {"temperature": 0, "maxTokens": self._max_tokens},
-                "outputConfig": {
+            }
+            if uses_tool_output:
+                request["toolConfig"] = {
+                    "tools": [{"toolSpec": {
+                        "name": schema_name,
+                        "description": "Return the validated AEGIS provider response",
+                        "inputSchema": {"json": schema},
+                    }}],
+                    "toolChoice": {"tool": {"name": schema_name}},
+                }
+            else:
+                request["outputConfig"] = {
                     "textFormat": {
                         "type": "json_schema",
                         "structure": {
                             "jsonSchema": {
-                                "schema": json.dumps(output_type.model_json_schema()),
-                                "name": output_type.__name__.removeprefix("_").lower(),
+                                "schema": json.dumps(schema),
+                                "name": schema_name,
                                 "description": "Validated AEGIS provider response",
                             }
                         },
                     }
-                },
-            }
+                }
             if self._system_prompt:
                 request["system"] = [{"text": self._system_prompt}]
             response = await self._converse(request)
             try:
                 blocks = response["output"]["message"]["content"]
-                raw_text = next(block["text"] for block in blocks if "text" in block)
-                output = output_type.model_validate(json.loads(raw_text))
+                if uses_tool_output:
+                    raw_output = next(
+                        block["toolUse"]["input"] for block in blocks
+                        if block.get("toolUse", {}).get("name") == schema_name
+                    )
+                else:
+                    raw_text = next(block["text"] for block in blocks if "text" in block)
+                    raw_output = json.loads(raw_text)
+                output = output_type.model_validate(raw_output)
                 if validate is not None:
                     validate(output)
                 request_id = response.get("ResponseMetadata", {}).get("RequestId")

@@ -4,8 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from app.integrations import get_client_gateway, get_provider_bundle
+from app.integrations.bedrock import BedrockAPIError
 from app.integrations.contracts import CanonicalSignal
 from app.integrations.errors import ClientGatewayError
+from app.integrations.gemini import GeminiAPIError
 from app.integrations.gateway import ClientGateway
 from app.integrations.providers import ProviderBundle
 from app.services.signal_service import get_signal_version, list_signals, process_evidence, relate_signals, review_signal
@@ -38,6 +40,9 @@ def index(review_status: str | None = None,
 async def from_evidence(evidence_id: str, gateway: ClientGateway = Depends(get_client_gateway),
                         providers: ProviderBundle = Depends(get_provider_bundle)) -> CanonicalSignal | None:
     try: return await process_evidence(evidence_id, gateway=gateway, providers=providers)
+    except (BedrockAPIError, GeminiAPIError) as error:
+        raise HTTPException(status_code=429 if error.status_code == 429 else 503,
+                            detail=str(error)) from error
     except LookupError as error: raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error: raise HTTPException(status_code=409, detail=str(error)) from error
     except ClientGatewayError as error: raise HTTPException(status_code=502, detail={"code": error.code, "message": str(error)}) from error

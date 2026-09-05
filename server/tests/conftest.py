@@ -39,9 +39,10 @@ def deterministic_provider_environment(monkeypatch: pytest.MonkeyPatch):
         "HYPOTHESIS_PROVIDER",
         "RISK_PROVIDER",
         "PLANNER_PROVIDER",
-        "BEDROCK_MODEL_ID",
     ):
         monkeypatch.delenv(name, raising=False)
+    if os.getenv("BEDROCK_LIVE_TEST") != "1":
+        monkeypatch.delenv("BEDROCK_MODEL_ID", raising=False)
 
 
 @pytest.fixture

@@ -11,7 +11,7 @@ from botocore.exceptions import BotoCoreError, ClientError, ReadTimeoutError
 from app.integrations.bedrock import (
     BedrockAPIError, BedrockFilterProvider, BedrockHypothesisProvider, BedrockInterpreterProvider,
     BedrockPlannerPanelProvider, BedrockPlannerProvider, BedrockRateLimitError,
-    BedrockRiskProvider, BedrockSchemaError,
+    BedrockRiskProvider, BedrockSchemaError, _bedrock_output_schema,
 )
 from app.integrations.contracts import (
     DisruptionContract, Evidence, EvidenceKind, FilterRequest, GenerationEntity,
@@ -21,10 +21,43 @@ from app.integrations.contracts import (
 from app.integrations.factory import (
     get_hypothesis_provider, get_planner_provider, get_provider_bundle, get_risk_provider,
 )
+from app.integrations.model_provider import (
+    FilterOutput, HypothesisOutput, InterpreterOutput, PlannerOutput, RiskOutput,
+)
 
 
 def run(awaitable):
     return asyncio.run(awaitable)
+
+
+@pytest.mark.parametrize("output_type", [
+    FilterOutput, InterpreterOutput, HypothesisOutput, RiskOutput, PlannerOutput,
+])
+def test_all_bedrock_output_schemas_exclude_unsupported_constraints(output_type):
+    forbidden = {
+        "default", "maximum", "maxItems", "maxLength", "minimum",
+        "minLength", "multipleOf",
+    }
+    errors = []
+
+    def inspect(value, path="$"):
+        if isinstance(value, list):
+            for index, item in enumerate(value):
+                inspect(item, f"{path}[{index}]")
+            return
+        if not isinstance(value, dict):
+            return
+        for key, item in value.items():
+            if key in forbidden:
+                errors.append(f"{path}.{key}")
+            if key == "additionalProperties" and item is not False:
+                errors.append(f"{path}.{key}={item!r}")
+            if key == "minItems" and item not in (0, 1):
+                errors.append(f"{path}.{key}={item!r}")
+            inspect(item, f"{path}.{key}")
+
+    inspect(_bedrock_output_schema(output_type))
+    assert errors == []
 
 
 class FakeBedrockClient:
@@ -37,9 +70,17 @@ class FakeBedrockClient:
         payload = self.payloads.pop(0)
         if isinstance(payload, Exception):
             raise payload
-        return {"output": {"message": {"role": "assistant", "content": [
-            {"text": payload if isinstance(payload, str) else json.dumps(payload)}
-        ]}}, "ResponseMetadata": {"RequestId": "bedrock-request-1"}}
+        if "toolConfig" in request:
+            name = request["toolConfig"]["toolChoice"]["tool"]["name"]
+            content = [{"toolUse": {
+                "toolUseId": "tool-use-1", "name": name, "input": payload,
+            }}]
+        else:
+            content = [
+                {"text": payload if isinstance(payload, str) else json.dumps(payload)}
+            ]
+        return {"output": {"message": {"role": "assistant", "content": content}},
+                "ResponseMetadata": {"RequestId": "bedrock-request-1"}}
 
 
 def evidence() -> Evidence:
@@ -83,7 +124,26 @@ def test_filter_uses_converse_structured_output_and_trusted_metadata():
     schema = json.loads(request["outputConfig"]["textFormat"]["structure"]
                         ["jsonSchema"]["schema"])
     assert "metadata" not in schema["properties"]
+    assert "minimum" not in schema["properties"]["relevance_probability"]
+    assert "maximum" not in schema["properties"]["relevance_probability"]
     assert request["inferenceConfig"] == {"temperature": 0, "maxTokens": 4096}
+
+
+def test_nova_2_uses_forced_tool_output_instead_of_unsupported_output_config():
+    client = FakeBedrockClient(filter_payload())
+    result = run(BedrockFilterProvider(
+        model="us.amazon.nova-2-lite-v1:0", client=client,
+    ).assess(FilterRequest(
+        evidence=evidence(), model_context={}, context_version="context-v1",
+    )))
+
+    request = client.calls[0]
+    assert "outputConfig" not in request
+    assert request["toolConfig"]["toolChoice"] == {
+        "tool": {"name": "filteroutput"},
+    }
+    assert request["toolConfig"]["tools"][0]["toolSpec"]["inputSchema"]["json"]
+    assert result.relevance_probability == 0.91
 
 
 def test_interpreter_preserves_grounding_boundary():

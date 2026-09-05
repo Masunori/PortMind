@@ -76,6 +76,7 @@ Resources:
             Action:
               - dynamodb:BatchGetItem
               - dynamodb:BatchWriteItem
+              - dynamodb:ConditionCheckItem
               - dynamodb:DeleteItem
               - dynamodb:DescribeTable
               - dynamodb:GetItem
@@ -129,13 +130,6 @@ Resources:
               Resource: '*'
       FunctionUrlConfig:
         AuthType: NONE
-        Cors:
-          AllowOrigins:
-            - !Ref ClientOrigin
-          AllowMethods:
-            - '*'
-          AllowHeaders:
-            - '*'
 
 Outputs:
   DynamoDBTableName:
