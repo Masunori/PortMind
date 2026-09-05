@@ -567,3 +567,14 @@ def test_conflicting_entity_types_for_same_id_are_rejected(test_session_factory)
         run(PlanningService(EmptyRiskProvider(), StubPlannerProvider()).generate_scenarios(
             gateway=FakeClientGateway(), entity_scope=[
                 entity("shared", "PORT", "Port"), entity("shared", "VESSEL", "Vessel")]))
+
+
+def test_hypothesis_generation_requires_explicit_entity_scope():
+    provider = FixedHypothesisProvider()
+    with pytest.raises(planning_api.HTTPException) as error:
+        run(planning_api.generate_hypotheses(
+            planning_api.HypothesisGenerationBody(prompt="port risks"),
+            FakeClientGateway(), provider))
+    assert error.value.status_code == 422
+    assert "add at least one entity" in error.value.detail
+    assert provider.request is None

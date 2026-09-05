@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
+from app.integrations.schema_validation import validate_payload
 
 from app.integrations.contracts import (
     FilterDecision, FilterRequest, FilterResult, HypothesisGenerationRequest,
@@ -254,7 +255,27 @@ class HypothesisProviderBehavior:
             f"Disruption contracts: {json.dumps([item.model_dump(mode='json') for item in request.disruption_contracts], sort_keys=True)}\n"
             f"Human prompt: {request.prompt}"
         )
-        output, request_id = await self._generate(prompt, HypothesisOutput)
+        contracts = {item.type: item for item in request.disruption_contracts}
+        scope = {item.entity_id: item for item in request.entity_scope}
+        def validate_output(output: HypothesisOutput) -> None:
+            for item in output.hypotheses:
+                contract = contracts.get(item.signal_type)
+                if contract is None:
+                    raise ValueError(f"Unknown disruption type: {item.signal_type}")
+                errors = validate_payload(item.payload, contract.payload_schema)
+                if errors:
+                    raise ValueError(f"Invalid hypothesis payload: {errors}")
+                targets = item.payload.get("target_ids", [])
+                if not isinstance(targets, list) or any(
+                    not isinstance(target, str) or target not in scope for target in targets
+                ):
+                    raise ValueError("Hypothesis references an unknown entity ID. "
+                        "Copy exact entity_id values from Entity scope into target_ids.")
+                valid_types = {value.casefold() for value in contract.target_types}
+                if any(scope[target].entity_type.casefold() not in valid_types for target in targets):
+                    raise ValueError("Hypothesis references an incompatible entity type")
+
+        output, request_id = await self._generate(prompt, HypothesisOutput, validate_output)
         metadata = self._metadata("hypothesis", request_id)
         hypotheses = [HypothesisSignalProposal(**item.model_dump(), metadata=metadata)
                       for item in output.hypotheses[:request.generation_limit]]

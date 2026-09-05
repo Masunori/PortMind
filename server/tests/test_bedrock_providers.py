@@ -366,3 +366,24 @@ def test_live_bedrock_filter_smoke():
     ).assess(FilterRequest(evidence=evidence(), model_context={},
                            context_version="live-smoke-v1")))
     assert result.metadata.provider == "bedrock"
+
+
+@pytest.mark.parametrize("target", ["invented-port", {"entity_id": "port-1"}, "vessel-1"])
+def test_hypothesis_corrects_invalid_entity_targets(target):
+    def payload(target_id):
+        return {"hypotheses": [{"id": "hyp-1", "name": "Port slowdown",
+            "signal_type": "PORT_CAPACITY_CHANGE", "payload": {"target_ids": [target_id]},
+            "occurrence_probability": 0.4, "rationale": "Plausible risk."}]}
+
+    client = FakeBedrockClient(payload(target), payload("port-1"))
+    request = HypothesisGenerationRequest(prompt="port risks", context_summary={},
+        context_version="context-v1", entity_scope=[
+            GenerationEntity(entity_id="port-1", entity_type="PORT", display_name="Port One"),
+            GenerationEntity(entity_id="vessel-1", entity_type="VESSEL", display_name="Vessel One")],
+        disruption_contracts=[DisruptionContract(type="PORT_CAPACITY_CHANGE",
+            target_types=["PORT"], payload_schema={"type": "object"}, schema_hash="a" * 64)])
+    result = run(BedrockHypothesisProvider(model="us.amazon.nova-2-lite-v1:0", client=client)
+        .propose_hypotheses(request))
+    assert result.hypotheses[0].payload["target_ids"] == ["port-1"]
+    assert len(client.calls) == 2
+    assert "Validation errors" in client.calls[1]["messages"][0]["content"][0]["text"]

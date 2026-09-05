@@ -92,6 +92,8 @@ def cycle(cycle_id: str) -> PlanningCycle: return required(cycle_id)
 async def generate_hypotheses(body: HypothesisGenerationBody,
         gateway: ClientGateway = Depends(get_client_gateway),
         provider: HypothesisProvider = Depends(get_hypothesis_provider)) -> HypothesisGenerationResponse:
+    if not body.entity_scope:
+        raise HTTPException(422, "Search for and add at least one entity before generating hypotheses")
     try:
         context = await gateway.get_context()
         catalog = await gateway.get_disruption_contracts()
@@ -110,7 +112,9 @@ async def generate_hypotheses(body: HypothesisGenerationBody,
             errors = validate_payload(item.payload, contract.payload_schema)
             if errors: raise ValueError(f"Invalid hypothesis payload: {errors}")
             targets = item.payload.get("target_ids", [])
-            if not isinstance(targets, list) or not set(targets).issubset(scope):
+            if not isinstance(targets, list) or any(
+                not isinstance(target, str) or target not in scope for target in targets
+            ):
                 raise ValueError("Hypothesis references an unknown entity ID")
             valid_types = {item.casefold() for item in contract.target_types}
             if any(scope[target].entity_type.casefold() not in valid_types for target in targets):
