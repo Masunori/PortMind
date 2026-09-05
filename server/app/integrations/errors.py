@@ -35,6 +35,18 @@ class StaleClientContextError(ClientGatewayError):
     code = "STALE_CONTEXT"
 
 
+class ClientIdempotencyConflictError(ClientGatewayError):
+    """An operation key was previously used for a different request."""
+
+    code = "IDEMPOTENCY_CONFLICT"
+
+
+class ClientConflictError(ClientGatewayError):
+    """A client conflict without a recognized version or idempotency code."""
+
+    code = "CLIENT_CONFLICT"
+
+
 class ClientAuthenticationError(ClientGatewayError):
     """Indicate that the client rejected integration credentials."""
 

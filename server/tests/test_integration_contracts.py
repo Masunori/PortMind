@@ -1,6 +1,7 @@
 """Contract and gateway regression tests for the platform/client boundary."""
 
 import asyncio
+import json
 from datetime import datetime, timezone
 
 import httpx
@@ -13,7 +14,7 @@ from app.integrations.contracts import (
     DisruptionReconciliationRequest, DisruptionReconciliationItem,
     DisruptionValidationRequest,
 )
-from app.integrations.errors import ClientAuthenticationError, ClientContractError, StaleClientContextError
+from app.integrations.errors import ClientAuthenticationError, ClientContractError, StaleClientContextError, ClientConflictError, ClientIdempotencyConflictError
 from app.integrations.gateway import HTTPClientGateway
 from app.integrations.providers import StubFilterProvider, StubInterpreterProvider
 from tests.fakes import FakeClientGateway
@@ -92,7 +93,7 @@ def test_fake_gateway_supports_deterministic_failures_and_submission():
     assert run(gateway.submit_simulation(request)).run_id == "fake-run-1"
 
 
-@pytest.mark.parametrize("status,error", [(401, ClientAuthenticationError), (409, StaleClientContextError)])
+@pytest.mark.parametrize("status,error", [(401, ClientAuthenticationError), (409, ClientConflictError)])
 def test_http_gateway_maps_stable_errors(status, error):
     transport = httpx.MockTransport(lambda request: httpx.Response(status, json={"detail": "secret"}))
     client = httpx.AsyncClient(transport=transport, base_url="http://client/integration/v1")
@@ -179,7 +180,8 @@ def test_http_gateway_applies_bearer_correlation_and_idempotency_headers():
     run(gateway.submit_simulation(request))
     assert seen[0].url.path == "/integration/v1/simulations"
     assert seen[0].headers["authorization"] == "Bearer token-value"
-    assert seen[0].headers["idempotency-key"] == "stable-key"
+    assert seen[0].headers["idempotency-key"] == json.loads(seen[0].content)["idempotency_key"]
+    assert len(seen[0].headers["idempotency-key"]) == 64
     assert seen[0].headers["x-correlation-id"]
     run(client.aclose())
 
@@ -225,4 +227,58 @@ def test_http_gateway_keeps_legacy_submission_out_of_reconciled_scenario():
     run(HTTPClientGateway("http://client", client=client).submit_simulation(request))
     assert seen["disruptions"] == [disruption]
     assert seen["scenario_disruptions"] == []
+    run(client.aclose())
+
+
+def test_conflict_logs_endpoint_versions_and_redacted_detail(caplog):
+    transport = httpx.MockTransport(lambda request: httpx.Response(409, json={
+        "detail": {"code": "STALE_STATE", "message": "Rejected Bearer test-token",
+                   "expected_state_version": "state-2", "payload": "private-response"},
+        "token": "test-token"}))
+    client = httpx.AsyncClient(transport=transport, base_url="http://client")
+    gateway = HTTPClientGateway("http://client", token="test-token", client=client)
+    with pytest.raises(StaleClientContextError):
+        run(gateway._request_json("POST", "/disruptions/reconcile", {
+            "context_version": "context-1", "state_version": "state-1",
+            "disruptions": "private-request"}))
+    run(client.aclose())
+    assert '"path": "/disruptions/reconcile"' in caplog.text
+    assert '"state_version": "state-1"' in caplog.text
+    assert '"expected_state_version": "state-2"' in caplog.text
+    assert "STALE_STATE" in caplog.text
+    assert "correlation_id" in caplog.text
+    assert "test-token" not in caplog.text
+    assert "private-request" not in caplog.text
+    assert "private-response" not in caplog.text
+
+
+@pytest.mark.parametrize("code,error", [("IDEMPOTENCY_CONFLICT", ClientIdempotencyConflictError),
+    ("STALE_CONTEXT", StaleClientContextError), ("OTHER_CONFLICT", ClientConflictError)])
+def test_gateway_preserves_conflict_category(code, error):
+    client = httpx.AsyncClient(transport=httpx.MockTransport(lambda request:
+        httpx.Response(409, json={"error": {"code": code}})), base_url="http://client")
+    with pytest.raises(error):
+        run(HTTPClientGateway("http://client", client=client).get_context())
+    run(client.aclose())
+
+
+def test_simulation_key_binds_complete_body_and_preserves_retries():
+    seen = []
+    def handler(request):
+        seen.append(request)
+        return httpx.Response(202, json={"id": "run-1", "status": "QUEUED"})
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="http://client")
+    gateway = HTTPClientGateway("http://client", client=client)
+    submission = SimulationSubmission(experiment_id="experiment-1", idempotency_key="stable-key",
+        context_version="ctx-1", state_version="state-1", signal_version_ids=[],
+        disruptions=[], occurrence_probability=0.5, provenance={"planning_cycle_id": "cycle-1"})
+    for request in [submission, submission,
+        submission.model_copy(update={"provenance": {"planning_cycle_id": "cycle-2"}}),
+        submission.model_copy(update={"experiment_id": "experiment-2"}),
+        submission.model_copy(update={"state_version": "state-2"})]:
+        run(gateway.submit_simulation(request))
+    keys = [request.headers["idempotency-key"] for request in seen]
+    assert keys[0] == keys[1]
+    assert len(set(keys)) == 4
+    assert all(json.loads(request.content)["idempotency_key"] == key for request, key in zip(seen, keys))
     run(client.aclose())

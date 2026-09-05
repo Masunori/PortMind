@@ -180,7 +180,11 @@ class PlanningService:
                 errors = validate_payload(disruption.payload, contract.payload_schema)
                 if errors: raise ValueError(f"Invalid disruption payload: {errors}")
                 if not _targets(disruption.payload).issubset(known):
-                    raise ValueError("Disruption references an unknown entity ID")
+                    unknown = sorted(_targets(disruption.payload) - known)
+                    source = ("Confirmed hypothesis" if proposal.proposal_id == "human-confirmed-hypotheses"
+                        else f"Generated scenario {proposal.proposal_id}")
+                    raise ValueError(f"Disruption references an unknown entity ID in {source}: {unknown}. "
+                        "Search for and add the intended entities, or regenerate the hypothesis with the current scope.")
                 if any(scope_by_id[target].entity_type.casefold() not in
                        {kind.casefold() for kind in contract.target_types}
                        for target in _targets(disruption.payload)):

@@ -1,18 +1,55 @@
 """Vendor-neutral schemas and behavior for structured model providers."""
 
 import json
+import logging
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 from app.integrations.schema_validation import validate_payload
 
 from app.integrations.contracts import (
-    FilterDecision, FilterRequest, FilterResult, HypothesisGenerationRequest,
+    DisruptionContract, FilterDecision, FilterRequest, FilterResult, HypothesisGenerationRequest,
     HypothesisGenerationResponse, HypothesisSignalProposal, InterpretationProposal,
     InterpretationRequest, PlanProposal, PlannerRequest, PlannerResponse,
     ProposedDisruption, ProposedIntervention, RiskGenerationRequest,
     RiskGenerationResponse, RiskScenarioProposal, SignalClass, TemporalWindow,
 )
+
+
+logger = logging.getLogger(__name__)
+
+
+def compatible_targets(request: RiskGenerationRequest | HypothesisGenerationRequest) -> dict[str, list[str]]:
+    return {contract.type: sorted(entity.entity_id for entity in request.entity_scope
+        if entity.entity_type.casefold() in {kind.casefold() for kind in contract.target_types})
+        for contract in request.disruption_contracts}
+
+
+def target_guidance(request: RiskGenerationRequest | HypothesisGenerationRequest) -> str:
+    return ("target_ids must be an array of exact ID strings from the compatible mapping. "
+        "Never use display names or objects as targets. If a disruption has no compatible IDs, "
+        "omit that hypothetical disruption. Return an empty proposal list if none can be formed.\n"
+        f"Compatible entity IDs by disruption type: {json.dumps(compatible_targets(request))}\n")
+
+
+def validate_targets(payload: dict[str, Any], contract: DisruptionContract,
+                     request: RiskGenerationRequest | HypothesisGenerationRequest) -> None:
+    targets = payload.get("target_ids", [])
+    allowed = compatible_targets(request)[contract.type]
+    if isinstance(targets, list) and all(isinstance(value, str) and value in allowed for value in targets):
+        return
+    values = targets if isinstance(targets, list) else [targets]
+    rejected = [{"value": value, "type": type(value).__name__} for value in values
+        if not isinstance(targets, list) or not isinstance(value, str) or value not in allowed]
+    diagnostic = {"disruption_type": contract.type,
+        "scope": [{"entity_id": entity.entity_id, "entity_type": entity.entity_type}
+                  for entity in request.entity_scope],
+        "target_ids_type": type(targets).__name__, "rejected_targets": rejected,
+        "compatible_ids": allowed}
+    logger.warning("Generated target mismatch: %s", json.dumps(diagnostic, default=str))
+    raise ValueError(f"Invalid target_ids for {contract.type}: {json.dumps(rejected, default=str)}. "
+        f"target_ids must be an array of strings copied exactly from {json.dumps(allowed)}. "
+        "Omit this hypothetical disruption if no compatible targets exist.")
 
 
 class FilterOutput(BaseModel):
@@ -185,8 +222,18 @@ class RiskProviderBehavior:
                 raise ValueError("selected_signal_version_ids contains an unknown ID")
             for item in output.proposals:
                 for disruption in item.hypothetical_disruptions:
-                    json_object(disruption.payload_json)
+                    payload = json_object(disruption.payload_json)
+                    contract = next((value for value in request.disruption_contracts
+                        if value.type == disruption.type), None)
+                    if contract is None:
+                        raise ValueError(f"Unknown disruption type: {disruption.type}")
+                    validate_targets(payload, contract, request)
+                    errors = validate_payload(payload, contract.payload_schema)
+                    if errors:
+                        raise ValueError(f"Invalid disruption payload: {errors}")
 
+
+        prompt += "\n" + target_guidance(request)
         output, request_id = await self._generate(prompt, RiskOutput, validate_output)
         metadata = self._metadata("risk", request_id)
         proposals = []
@@ -256,25 +303,18 @@ class HypothesisProviderBehavior:
             f"Human prompt: {request.prompt}"
         )
         contracts = {item.type: item for item in request.disruption_contracts}
-        scope = {item.entity_id: item for item in request.entity_scope}
         def validate_output(output: HypothesisOutput) -> None:
             for item in output.hypotheses:
                 contract = contracts.get(item.signal_type)
                 if contract is None:
                     raise ValueError(f"Unknown disruption type: {item.signal_type}")
+                validate_targets(item.payload, contract, request)
                 errors = validate_payload(item.payload, contract.payload_schema)
                 if errors:
                     raise ValueError(f"Invalid hypothesis payload: {errors}")
-                targets = item.payload.get("target_ids", [])
-                if not isinstance(targets, list) or any(
-                    not isinstance(target, str) or target not in scope for target in targets
-                ):
-                    raise ValueError("Hypothesis references an unknown entity ID. "
-                        "Copy exact entity_id values from Entity scope into target_ids.")
-                valid_types = {value.casefold() for value in contract.target_types}
-                if any(scope[target].entity_type.casefold() not in valid_types for target in targets):
-                    raise ValueError("Hypothesis references an incompatible entity type")
 
+
+        prompt += "\n" + target_guidance(request)
         output, request_id = await self._generate(prompt, HypothesisOutput, validate_output)
         metadata = self._metadata("hypothesis", request_id)
         hypotheses = [HypothesisSignalProposal(**item.model_dump(), metadata=metadata)

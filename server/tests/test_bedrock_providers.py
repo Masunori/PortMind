@@ -185,6 +185,8 @@ def test_hypothesis_risk_and_planner_providers_use_bedrock():
     risk = run(BedrockRiskProvider(model="model-1", client=risk_client)
         .propose_scenarios(RiskGenerationRequest(context_summary={},
             context_version="context-v1", state_version="state-v1",
+            entity_scope=[GenerationEntity(entity_id="port-1", entity_type="PORT",
+                display_name="Port One")],
             disruption_contracts=[contract], generation_limit=1)))
     assert risk.proposals[0].metadata.provider == "bedrock"
 
@@ -387,3 +389,68 @@ def test_hypothesis_corrects_invalid_entity_targets(target):
     assert result.hypotheses[0].payload["target_ids"] == ["port-1"]
     assert len(client.calls) == 2
     assert "Validation errors" in client.calls[1]["messages"][0]["content"][0]["text"]
+
+
+@pytest.mark.parametrize("target", ["invented-port", {"entity_id": "port-1"}, "vessel-1"])
+def test_risk_corrects_invalid_disruption_targets(target, caplog):
+    def payload(target_id):
+        return {"proposals": [{"proposal_id": "risk-1", "name": "Port risk",
+            "description": "Capacity scenario", "selected_signal_version_ids": [],
+            "hypothetical_disruptions": [{"type": "PORT_CAPACITY_CHANGE",
+                "payload_json": json.dumps({"target_ids": [target_id]})}],
+            "occurrence_probability": 0.7, "assumptions": [],
+            "rationale": "Capacity may fall."}], "warnings": []}
+
+    client = FakeBedrockClient(payload(target), payload("port-1"))
+    request = RiskGenerationRequest(context_summary={}, context_version="context-v1",
+        state_version="state-v1", entity_scope=[
+            GenerationEntity(entity_id="port-1", entity_type="PORT", display_name="Port One"),
+            GenerationEntity(entity_id="vessel-1", entity_type="VESSEL", display_name="Vessel One")],
+        disruption_contracts=[DisruptionContract(type="PORT_CAPACITY_CHANGE",
+            target_types=["PORT"], payload_schema={"type": "object"}, schema_hash="a" * 64)])
+    result = run(BedrockRiskProvider(model="us.amazon.nova-2-lite-v1:0", client=client)
+        .propose_scenarios(request))
+    assert result.proposals[0].hypothetical_disruptions[0].payload["target_ids"] == ["port-1"]
+    assert len(client.calls) == 2
+    assert "Validation errors" in client.calls[1]["messages"][0]["content"][0]["text"]
+
+    first_prompt = client.calls[0]["messages"][0]["content"][0]["text"]
+    assert 'Compatible entity IDs by disruption type: {"PORT_CAPACITY_CHANGE": ["port-1"]}' in first_prompt
+    retry_prompt = client.calls[1]["messages"][0]["content"][0]["text"]
+    assert 'strings copied exactly from ["port-1"]' in retry_prompt
+    assert '"rejected_targets"' in caplog.text
+    assert '"entity_type": "VESSEL"' in caplog.text
+
+
+def test_missing_nova_tool_logs_diagnostics_and_corrects_prompt(caplog):
+    class MissingToolClient:
+        def __init__(self):
+            self.calls = []
+
+        def converse(self, **request):
+            self.calls.append(request)
+            return {"output": {"message": {"content": [{"text": "private response"}]}},
+                "stopReason": "max_tokens", "usage": {"outputTokens": 4096},
+                "ResponseMetadata": {"RequestId": "diagnostic-request"}}
+
+    client = MissingToolClient()
+    with pytest.raises(BedrockSchemaError, match="after 2 attempts"):
+        run(BedrockFilterProvider(model="us.amazon.nova-2-lite-v1:0", max_attempts=2,
+            client=client).assess(FilterRequest(evidence=evidence(), model_context={},
+                context_version="context-v1")))
+    assert "Missing expected toolUse.input for tool filteroutput" in client.calls[1]["messages"][0]["content"][0]["text"]
+    records = [record for record in caplog.records if "Bedrock output validation failed" in record.message]
+    assert len(records) == 2
+    assert '"stop_reason": "max_tokens"' in records[0].message
+    assert '"request_id": "diagnostic-request"' in records[0].message
+    assert '"outputTokens": 4096' in records[0].message
+    assert "private response" not in caplog.text
+
+
+def test_validation_diagnostics_omit_model_payload(caplog):
+    client = FakeBedrockClient({"private_field": "private response"})
+    with pytest.raises(BedrockSchemaError):
+        run(BedrockFilterProvider(model="model-1", max_attempts=1, client=client)
+            .assess(FilterRequest(evidence=evidence(), model_context={}, context_version="context-v1")))
+    assert "private response" not in caplog.text
+    assert "missing" in caplog.text

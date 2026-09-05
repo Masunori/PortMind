@@ -6,6 +6,7 @@ import asyncio
 from datetime import datetime, timezone
 import hashlib
 import json
+import logging
 from typing import Any, Protocol, TypeVar
 from uuid import uuid4
 
@@ -27,9 +28,32 @@ from app.integrations.errors import (
     ClientAuthenticationError, ClientContractError, ClientGatewayError,
     ClientRateLimitError, ClientTimeoutError, ClientUnavailableError,
     StaleClientContextError,
+    ClientIdempotencyConflictError, ClientConflictError,
 )
 
 T = TypeVar("T", bound=BaseModel)
+logger = logging.getLogger(__name__)
+
+
+def _conflict_detail(value: Any, secrets: list[str], depth: int = 0) -> Any:
+    """Keep bounded diagnostic fields, excluding arbitrary payloads and credentials."""
+    if depth > 4:
+        return "[truncated]"
+    if isinstance(value, dict):
+        allowed = {"detail", "error", "errors", "code", "message", "reason",
+                   "context_version", "state_version", "catalog_version",
+                   "expected", "actual", "received", "current"}
+        return {key: _conflict_detail(item, secrets, depth + 1)
+                for key, item in value.items() if key in allowed or key in {
+                    f"{prefix}_{version}_version" for prefix in ("expected", "actual", "received", "current")
+                    for version in ("context", "state", "catalog")}}
+    if isinstance(value, list):
+        return [_conflict_detail(item, secrets, depth + 1) for item in value[:10]]
+    if isinstance(value, str):
+        for secret in secrets:
+            value = value.replace(secret, "[redacted]")
+        return value[:1000]
+    return value if value is None or isinstance(value, (int, float, bool)) else "[omitted]"
 
 
 class ClientGateway(Protocol):
@@ -91,7 +115,33 @@ class HTTPClientGateway:
                 if response.status_code in (401, 403):
                     raise ClientAuthenticationError("Client authentication failed")
                 if response.status_code == 409:
-                    raise StaleClientContextError("Client context or state is stale")
+                    try:
+                        detail = response.json()
+                    except ValueError:
+                        detail = {"message": "Non-JSON conflict response"}
+                    authorization = self._headers.get("Authorization", "")
+                    secrets = [value for value in (authorization, authorization.removeprefix("Bearer ")) if value]
+                    versions = {key: value for key, value in (payload or {}).items()
+                                if key in {"context_version", "state_version", "catalog_version",
+                                           "schema_version", "capability_version"}}
+                    logger.warning("Client gateway conflict: %s", json.dumps({
+                        "method": method, "path": path, "status": 409,
+                        "correlation_id": headers["X-Correlation-ID"],
+                        "submitted_versions": _conflict_detail(versions, secrets),
+                        "response_detail": _conflict_detail(detail, secrets),
+                    }, default=str))
+                    error_detail = detail
+                    for _ in range(4):
+                        if not isinstance(error_detail, dict) or "code" in error_detail:
+                            break
+                        error_detail = error_detail.get("error", error_detail.get("detail"))
+                    code = error_detail.get("code") if isinstance(error_detail, dict) else None
+                    if code == "IDEMPOTENCY_CONFLICT":
+                        raise ClientIdempotencyConflictError(
+                            "Simulation request key was already used for a different request")
+                    if code in {"STALE_CONTEXT", "STALE_STATE", "STALE_CATALOG"}:
+                        raise StaleClientContextError("Client context or state is stale")
+                    raise ClientConflictError("Client rejected the request with a conflict")
                 if response.status_code == 429:
                     raise ClientRateLimitError("Client rate limit exceeded", retryable=True)
                 if response.status_code >= 500 and attempt < self._max_retries:
@@ -261,10 +311,14 @@ class HTTPClientGateway:
                 "scenario_disruptions": scenario_disruptions,
                 "interventions": request.provenance.get("interventions", []),
                 "experiment_id": request.experiment_id,
-                "provenance": request.provenance,
-                "idempotency_key": request.idempotency_key}
+                "provenance": request.provenance}
+        # Bind retries to both the logical operation and the complete wire payload.
+        # Provenance and experiment IDs can differ even when scenarios are identical.
+        wire_key = _canonical_hash({"version": "simulation-v2",
+            "operation_key": request.idempotency_key, "body": body})
+        body["idempotency_key"] = wire_key
         raw = await self._request_json("POST", "/simulations", body,
-                                       idempotency_key=request.idempotency_key)
+                                       idempotency_key=wire_key)
         try:
             return SimulationAccepted(run_id=raw["id"], status=raw["status"],
                                       context_version=request.context_version)

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 from typing import Any, Callable, TypeVar
 
 import boto3
@@ -23,6 +24,7 @@ from app.integrations.model_provider import (
 
 
 OutputModel = TypeVar("OutputModel", bound=BaseModel)
+logger = logging.getLogger(__name__)
 
 
 _UNSUPPORTED_OUTPUT_SCHEMA_KEYS = frozenset({
@@ -189,7 +191,27 @@ class _BedrockStructuredProvider:
                 return output, request_id
             except (KeyError, StopIteration, TypeError, ValueError,
                     json.JSONDecodeError, ValidationError) as error:
-                validation_error = str(error)
+                if isinstance(error, StopIteration):
+                    validation_error = (f"Missing expected toolUse.input for tool {schema_name}"
+                        if uses_tool_output else "Missing expected text output block")
+                elif isinstance(error, ValidationError):
+                    validation_error = json.dumps([
+                        {"location": item["loc"], "type": item["type"]}
+                        for item in error.errors(include_input=False, include_context=False,
+                                                 include_url=False)
+                    ])
+                else:
+                    validation_error = str(error)
+                blocks = response.get("output", {}).get("message", {}).get("content", [])
+                logger.warning("Bedrock output validation failed: %s", json.dumps({
+                    "task": schema_name, "model": self._model,
+                    "attempt": attempt, "max_attempts": self._max_attempts,
+                    "request_id": response.get("ResponseMetadata", {}).get("RequestId"),
+                    "stop_reason": response.get("stopReason"),
+                    "usage": response.get("usage", {}),
+                    "content_block_types": [list(block) for block in blocks if isinstance(block, dict)],
+                    "error_type": type(error).__name__, "validation_error": validation_error[:2000],
+                }, default=str))
                 if attempt == self._max_attempts:
                     raise BedrockSchemaError(
                         f"Bedrock returned invalid structured output after {attempt} attempts"
